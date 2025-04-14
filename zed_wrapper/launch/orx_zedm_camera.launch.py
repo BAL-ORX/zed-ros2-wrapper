@@ -22,6 +22,8 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction, SetEnvironment
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, Command, TextSubstitution
 from launch_ros.actions import Node
+from launch_ros.actions import ComposableNodeContainer
+from launch_ros.descriptions import ComposableNode
 
 import yaml
 
@@ -133,13 +135,22 @@ def launch_setup(context, *args, **kwargs):
             xacro_command.append(" ")
 
     # Robot State Publisher node
-    rsp_node = Node(
+    # rsp_node = ComposableNode(
+    #     condition=IfCondition(publish_urdf),
+    #     package="robot_state_publisher",
+    #     namespace=datahub_name,
+    #     executable="robot_state_publisher",
+    #     name="zed_state_publisher",
+    #     output="screen",
+    #     parameters=[{"robot_description": Command(xacro_command)}],
+    # )
+
+    rsp_node = ComposableNode(
         condition=IfCondition(publish_urdf),
         package="robot_state_publisher",
         namespace=datahub_name,
-        executable="robot_state_publisher",
+        plugin="robot_state_publisher::RobotStatePublisher",
         name="zed_state_publisher",
-        output="screen",
         parameters=[{"robot_description": Command(xacro_command)}],
     )
 
@@ -148,20 +159,39 @@ def launch_setup(context, *args, **kwargs):
     #     node_parameters.append(ros_params_override_path)
 
     # ZED Wrapper node
-    zed_wrapper_node = Node(
-        package="zed_wrapper",
+    # zed_wrapper_node = Node(
+    #     package="zed_wrapper",
+    #     namespace=datahub_name,
+    #     executable="zed_wrapper",
+    #     name=camera_name,
+    #     output="screen",
+    #     # prefix=['valgrind'],
+    #     # prefix=['xterm -e valgrind --tools=callgrind'],
+    #     # prefix=['xterm -e gdb -ex run --args'],
+    #     # prefix=['gdbserver localhost:3000'],
+    #     parameters=node_parameters,
+    # )
+
+    zed_wrapper_component = ComposableNode(
+        package="zed_components",
         namespace=datahub_name,
-        executable="zed_wrapper",
+        plugin="stereolabs::ZedCamera",
         name=camera_name,
-        output="screen",
-        # prefix=['valgrind'],
-        # prefix=['xterm -e valgrind --tools=callgrind'],
-        # prefix=['xterm -e gdb -ex run --args'],
-        # prefix=['gdbserver localhost:3000'],
         parameters=node_parameters,
+        extra_arguments=[{"use_intra_process_comms": True}],
     )
 
-    return [rsp_node, zed_wrapper_node]
+    zed_container = ComposableNodeContainer(
+        name=f"{camera_name}_container",
+        namespace=datahub_name,
+        package="rclcpp_components",
+        composable_node_descriptions=[rsp_node, zed_wrapper_component],
+        executable="component_container_isolated",
+        arguments=["--use_multi_threaded_executor", "--ros-args", "--log-level", "info"],
+        output="screen",
+    )
+
+    return [zed_container]
 
 
 def generate_launch_description():
