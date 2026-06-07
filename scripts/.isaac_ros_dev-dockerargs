@@ -1,0 +1,5 @@
+--privileged
+--volume /run/udev:/run/udev:ro
+-e RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile.xml
+-e ROS_DOMAIN_ID=1

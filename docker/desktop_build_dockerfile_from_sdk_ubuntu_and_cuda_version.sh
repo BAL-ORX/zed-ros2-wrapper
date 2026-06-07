@@ -41,7 +41,7 @@ ZED_SDK_version=$3
 # copy the wrapper content
 rm -r ./tmp_sources
 mkdir -p ./tmp_sources
-cp -r ../zed* ./tmp_sources
+cp -r ../src/zed* ./tmp_sources
 
 # Check if the third arg is a custom path
 CUSTOM_ZED_SDK_URL=$3
