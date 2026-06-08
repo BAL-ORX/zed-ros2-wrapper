@@ -1,6 +1,6 @@
 docker:
   run:
-    container_name: face_blur_dev_container
+    container_name: zed_dev_container
   image:
     additional_image_keys:
       - zed

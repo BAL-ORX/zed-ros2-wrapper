@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy.sh — build (if needed) and run face_blur in the Isaac ROS container.
+# deploy.sh — build (if needed) and run zed_wrapper in the Isaac ROS container.
 #
 # If the dev container (from run_dev.sh) is already running, exec-s into it.
 # Otherwise uses `isaac-ros activate` to start it — no docker flags duplicated.
@@ -9,20 +9,19 @@
 #
 # Examples:
 #   ./deploy.sh
-#   ./deploy.sh face_blur.launch.py
-#   ./deploy.sh face_blur.launch.py input_topic:=/camera/image_raw
+#   ./deploy.sh zed_wrapper.launch.py
 
 set -euo pipefail
 
 WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-LAUNCH_PKG="face_blur"
-LAUNCH_FILE="${1:-face_blur.launch.py}"
+LAUNCH_PKG="zed_wrapper"
+LAUNCH_FILE="${1:-zed_camera.launch.py}"
 shift 2>/dev/null || true
 LAUNCH_ARGS="${*:-}"
 
 # Must match .isaac-ros-cli/config.yaml → docker.run.container_name
-CONTAINER="face_blur_dev_container"
+CONTAINER="zed_dev_container"
 
 # ── Startup script (runs inside the container via docker exec) ──────────────
 # Host variables expand now; \${...} expands inside the container.
@@ -32,11 +31,13 @@ WS=/workspaces/isaac_ros-dev
 
 # Source ROS — no-op if workspace-entrypoint already did it, required otherwise
 source "/opt/ros/\${ROS_DISTRO:-jazzy}/setup.bash" 2>/dev/null || true
+# Source the image's pre-built workspace (matches what /etc/bash.bashrc does in interactive shells)
+source "/opt/ros_ws/install/setup.bash" 2>/dev/null || true
 
 if [ ! -f "\${WS}/install/${LAUNCH_PKG}/share/${LAUNCH_PKG}/package.xml" ]; then
     echo "[deploy] No colcon build found — building..."
     cd "\${WS}"
-    colcon build --packages-up-to ${LAUNCH_PKG}
+    bash "\${WS}/build_package.sh"
 fi
 
 source "\${WS}/install/setup.bash"
