@@ -1,27 +1,31 @@
 #!/usr/bin/env bash
-# deploy.sh — build (if needed) and run zed_wrapper in the Isaac ROS container.
+# deploy.sh — build (if needed) and run a ROS 2 launch file in the Isaac ROS container.
 #
 # If the dev container (from run_dev.sh) is already running, exec-s into it.
-# Otherwise uses `isaac-ros activate` to start it — no docker flags duplicated.
+# Otherwise uses `isaac-ros activate` to start it in the background.
 #
 # Usage:
 #   ./deploy.sh [LAUNCH_FILE [LAUNCH_ARGS...]]
+#   CYCLONEDDS_PROFILE=/path/to/dds.xml ./deploy.sh   # use an external CycloneDDS config
 #
 # Examples:
 #   ./deploy.sh
-#   ./deploy.sh zed_wrapper.launch.py
+#   ./deploy.sh zed_camera.launch.py
 
 set -euo pipefail
 
 WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-LAUNCH_PKG="zed_wrapper"
-LAUNCH_FILE="${1:-zed_camera.launch.py}"
+# Project-specific values (PROJECT_NAME, REGISTRY, LAUNCH_PKG, LAUNCH_FILE)
+source "${WORKSPACE}/project.env"
+
+# Allow the launch file to be overridden as the first argument
+LAUNCH_FILE="${1:-${LAUNCH_FILE}}"
 shift 2>/dev/null || true
 LAUNCH_ARGS="${*:-}"
 
-# Must match .isaac-ros-cli/config.yaml → docker.run.container_name
-CONTAINER="zed_dev_container"
+# Container name is canonical in scripts/.isaac-ros-cli/config.yaml
+CONTAINER=$(grep -m1 'container_name:' "${WORKSPACE}/scripts/.isaac-ros-cli/config.yaml" | awk '{print $2}')
 
 # ── Startup script (runs inside the container via docker exec) ──────────────
 # Host variables expand now; \${...} expands inside the container.
@@ -37,7 +41,7 @@ source "/opt/ros_ws/install/setup.bash" 2>/dev/null || true
 if [ ! -f "\${WS}/install/${LAUNCH_PKG}/share/${LAUNCH_PKG}/package.xml" ]; then
     echo "[deploy] No colcon build found — building..."
     cd "\${WS}"
-    bash "\${WS}/build_package.sh"
+    bash "\${WS}/scripts/build_package.sh"
 fi
 
 source "\${WS}/install/setup.bash"
@@ -48,13 +52,22 @@ HEREDOC
 if ! docker ps --quiet --filter "name=^/${CONTAINER}$" | grep -q .; then
     echo "[deploy] Starting container..."
 
-    # Inject --detach into the docker run command that run_dev.py builds.
-    # This makes isaac-ros activate start the container in the background
-    # and return immediately instead of opening an interactive bash session.
-    # The regular scripts/.isaac_ros_dev-dockerargs (CycloneDDS vars) is still
-    # auto-discovered and loaded alongside this file.
+    # Build the DOCKER_ARGS_FILE: --detach so activate returns immediately,
+    # plus CYCLONEDDS_URI injected here so it overrides the workspace dockerargs
+    # (DOCKER_ARGS_FILE is loaded first by the CLI, but workspace is loaded last
+    # and would override — so we removed CYCLONEDDS_URI from the workspace file
+    # and set it exclusively here).
     _DETACH_ARGS=$(mktemp)
     echo "--detach" > "${_DETACH_ARGS}"
+    if [[ -n "${CYCLONEDDS_PROFILE:-}" ]]; then
+        [[ -f "${CYCLONEDDS_PROFILE}" ]] || \
+            { echo "[deploy] ERROR: CYCLONEDDS_PROFILE not found: ${CYCLONEDDS_PROFILE}"; exit 1; }
+        echo "-v ${CYCLONEDDS_PROFILE}:/cyclone_profile.xml:ro" >> "${_DETACH_ARGS}"
+        echo "-e CYCLONEDDS_URI=/cyclone_profile.xml" >> "${_DETACH_ARGS}"
+        echo "[deploy] Using external CycloneDDS profile: ${CYCLONEDDS_PROFILE}"
+    else
+        echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile.xml" >> "${_DETACH_ARGS}"
+    fi
 
     DOCKER_ARGS_FILE="${_DETACH_ARGS}" \
     ISAAC_DIR="${WORKSPACE}" \

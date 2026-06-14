@@ -1,0 +1,7 @@
+# Exclude colcon build artifacts and git history from the Docker build context.
+# The workspace root is used as context for Dockerfile.dependency so that
+# COPY src/*/package.xml works — but only those files are actually needed.
+build/
+install/
+log/
+.git/

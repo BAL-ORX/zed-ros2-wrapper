@@ -1,0 +1,342 @@
+# orx_zed_config.yaml — single configuration file for orx_zed_camera.launch.py
+#
+# Place this file at the workspace root (/workspaces/isaac_ros-dev/ inside the container).
+# Pass a different path with:
+#   ros2 launch zed_wrapper orx_zed_camera.launch.py config_path:=/path/to/file.yaml
+#
+# Parameter priority (highest → lowest):
+#   1. launch: section (passed as ROS 2 launch arguments)
+#   2. ros_params: section below (passed as ros_params_override_path)
+#   3. Camera-specific package defaults  (e.g. zed2i.yaml)
+#   4. Common package defaults           (common_stereo.yaml)
+
+# ── Launch arguments ──────────────────────────────────────────────────────────
+# These map 1-to-1 to the arguments declared in zed_camera.launch.py.
+launch:
+  camera_model: "zed2i"           # REQUIRED — set to your camera model:
+                                   #   zed | zedm | zed2 | zed2i | zedx | zedxm | zedxnano
+                                   #   zedxhdr | zedxhdrmini | zedxhdrmax | virtual
+                                   #   zedxonegs | zedxone4k | zedxonehdr
+  camera_name: "zed"              # Used as the ROS namespace
+  node_name: "zed_node"
+  namespace: ""                   # Defaults to camera_name if empty
+  serial_number: 0                # 0 = open first available camera
+  camera_id: -1                   # -1 = unused
+  publish_urdf: true
+  publish_tf: true
+  publish_map_tf: true
+  publish_imu_tf: false
+  enable_gnss: false
+  enable_ipc: true
+  use_sim_time: false
+  svo_path: "live"                # Path to SVO file, or "live" for live camera
+  publish_svo_clock: false
+  node_log_type: "both"           # "screen" | "log" | "both"
+  sim_mode: false
+  sim_address: "127.0.0.1"
+  sim_port: 30000
+  stream_address: ""
+  stream_port: 30000
+  ipc_nitros_conflict_policy: "disable_ipc"  # "disable_ipc" | "exit"
+
+
+# ── ROS node parameters ───────────────────────────────────────────────────────
+# Merged from common_stereo.yaml + zed2i.yaml + object_detection.yaml.
+# Values here override the package defaults. Comments are kept from the source files.
+ros_params:
+  /**:
+    ros__parameters:
+
+      # ── Simulation ───────────────────────────────────────────────────────────
+      simulation:
+        sim_enabled: false
+        sim_address: '127.0.0.1'
+        sim_port: 30000
+
+      # ── SVO ──────────────────────────────────────────────────────────────────
+      svo:
+        svo_encoding_preset: 'DEFAULT'   # 'DEFAULT', 'ULTRAFAST', 'FAST', 'MEDIUM', 'SLOW'
+        decryption_key: ""
+        use_svo_timestamps: true
+        publish_svo_clock: false         # overwritten by launch.publish_svo_clock
+        svo_loop: false
+        svo_realtime: false
+        play_from_frame: 0
+        replay_rate: 1.0                 # [0.10 – 5.0]
+
+      # ── General ──────────────────────────────────────────────────────────────
+      general:
+        # --- from common_stereo.yaml ---
+        camera_timeout_sec: 5
+        camera_max_reconnect: 5
+        camera_flip: false
+        self_calib: true
+        serial_number: 0                 # overwritten by launch.serial_number
+        pub_resolution: 'NATIVE'         # 'NATIVE' | 'CUSTOM'
+        pub_downscale_factor: 2.0        # used only when pub_resolution is 'CUSTOM'
+        grab_compute_capping_fps: 0.0
+        pub_frame_rate: 0.0              # [DYNAMIC] 0 = no limit (= grab_frame_rate)
+        enable_image_validity_check: 1
+        gpu_id: -1
+        optional_opencv_calibration_file: ''
+        async_image_retrieval: false
+        publish_status: true
+        sdk_use_monotonic_clock: false
+        # --- from zed2i.yaml ---
+        camera_model: 'zed2i'           # overwritten by launch.camera_model
+        camera_name: 'zed2i'            # overwritten by launch.camera_name
+        grab_resolution: 'HD720'        # 'HD2K' | 'HD1080' | 'HD720' | 'VGA' | 'AUTO'
+        grab_frame_rate: 60
+
+      # ── Video ─────────────────────────────────────────────────────────────────
+      video:
+        # --- from common_stereo.yaml ---
+        saturation: 4                    # [DYNAMIC]
+        sharpness: 4                     # [DYNAMIC]
+        gamma: 8                         # [DYNAMIC]
+        auto_exposure_gain: true         # [DYNAMIC]
+        exposure: 80                     # [DYNAMIC]
+        gain: 80                         # [DYNAMIC]
+        auto_whitebalance: true          # [DYNAMIC]
+        whitebalance_temperature: 42     # [DYNAMIC] [28,65]×100, only if auto_whitebalance false
+        enable_24bit_output: false
+        publish_rgb: true
+        publish_left_right: false
+        publish_raw: false
+        publish_gray: false
+        publish_stereo: false
+        # --- from zed2i.yaml ---
+        brightness: 4                    # [DYNAMIC] [0-8]
+        contrast: 4                      # [DYNAMIC] [0-8]
+        hue: 0                           # [DYNAMIC] [0-11]
+
+      # ── Sensors ───────────────────────────────────────────────────────────────
+      sensors:
+        publish_imu_tf: false            # overwritten by launch.publish_imu_tf
+        sensors_image_sync: false
+        sensors_pub_rate: 100.0          # Hz, MAX 400
+        publish_imu: true
+        publish_imu_raw: false
+        publish_cam_imu_transf: false
+        publish_mag: false
+        publish_baro: false
+        publish_temp: false
+
+      # ── Region of Interest ────────────────────────────────────────────────────
+      region_of_interest:
+        automatic_roi: false
+        depth_far_threshold_meters: 2.5
+        image_height_ratio_cutoff: 0.5
+        #manual_polygon: '[]'
+        #manual_polygon: '[[0.25,0.33],[0.75,0.33],[0.75,0.5],[0.5,0.75],[0.25,0.5]]'
+        #manual_polygon: '[[0.25,0.25],[0.75,0.25],[0.75,0.75],[0.25,0.75]]'
+        #manual_polygon: '[[0.5,0.25],[0.75,0.5],[0.5,0.75],[0.25,0.5]]'
+        apply_to_depth: true
+        apply_to_positional_tracking: true
+        apply_to_object_detection: true
+        apply_to_body_tracking: true
+        apply_to_spatial_mapping: true
+        publish_roi_mask: false
+
+      # ── Depth ─────────────────────────────────────────────────────────────────
+      depth:
+        # --- from common_stereo.yaml ---
+        depth_mode: 'NONE'              # 'NONE' | 'NEURAL_LIGHT' | 'NEURAL' | 'NEURAL_PLUS'
+        depth_stabilization: -1         # negative = SDK default, 0 = disabled, [0,100]
+        openni_depth_mode: false        # false = 32-bit float [m], true = 16-bit uint [mm]
+        point_cloud_freq: 10.0          # [DYNAMIC] Hz
+        point_cloud_res: 'COMPACT'      # 'COMPACT' | 'REDUCED'
+        depth_confidence: 95            # [DYNAMIC]
+        depth_texture_conf: 100         # [DYNAMIC]
+        remove_saturated_areas: true    # [DYNAMIC]
+        publish_depth_map: true
+        publish_depth_info: false
+        publish_point_cloud: true
+        voxel_point_cloud: false        # [DYNAMIC]
+        voxel_size_mm: -1.0             # [DYNAMIC] -1 = 100mm default
+        voxel_resolution_mode: 'STEREO_UNCERTAINTY'  # [DYNAMIC] 'FIXED' | 'STEREO_UNCERTAINTY' | 'LINEAR'
+        voxel_resolution_scale: 0.2     # [DYNAMIC] [0.01, 3.0]
+        publish_depth_confidence: false
+        publish_disparity: false
+        # --- from zed2i.yaml ---
+        min_depth: 0.01                 # [0.01, 3.0] m
+        max_depth: 15.0                 # [0.5, 20.0] m
+
+      # ── Positional Tracking ────────────────────────────────────────────────────
+      pos_tracking:
+        pos_tracking_enabled: false
+        pos_tracking_mode: 'AUTO'       # 'AUTO' | 'GEN_1' | 'GEN_3'
+        imu_fusion: true
+        publish_tf: true                # overwritten by launch.publish_tf
+        publish_map_tf: true            # overwritten by launch.publish_map_tf
+        map_frame: 'map'
+        odometry_frame: 'odom'
+        area_memory: true
+        area_file_path: ''
+        enable_localization_only: false
+        save_area_memory_on_closing: false
+        reset_odom_with_loop_closure: true
+        publish_3d_landmarks: false
+        publish_lm_skip_frame: 5
+        depth_min_range: 0.0
+        set_as_static: false
+        set_gravity_as_origin: true
+        floor_alignment: false
+        initial_base_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # [X, Y, Z, R, P, Y]
+        path_pub_rate: 2.0              # [DYNAMIC] Hz
+        path_max_count: -1              # -1 = unlimited
+        two_d_mode: false
+        fixed_z_value: 0.0
+        transform_time_offset: 0.0
+        reset_pose_with_svo_loop: true
+        publish_odom_pose: true
+        publish_pose_cov: false
+        publish_cam_path: false
+
+      # ── GNSS Fusion ───────────────────────────────────────────────────────────
+      gnss_fusion:
+        gnss_fusion_enabled: false      # overwritten by launch.enable_gnss
+        gnss_fix_topic: '/fix'
+        gnss_zero_altitude: false
+        h_covariance_mul: 1.0
+        v_covariance_mul: 1.0
+        publish_utm_tf: true
+        broadcast_utm_transform_as_parent_frame: false
+        enable_reinitialization: false
+        enable_rolling_calibration: true
+        enable_translation_uncertainty_target: false
+        gnss_vio_reinit_threshold: 5.0
+        target_translation_uncertainty: 0.1  # m
+        target_yaw_uncertainty: 0.1          # rad
+
+      # ── Mapping ───────────────────────────────────────────────────────────────
+      mapping:
+        mapping_enabled: false
+        resolution: 0.05                # m [0.01, 0.2]
+        max_mapping_range: 5.0          # m (-1 = automatic)
+        fused_pointcloud_freq: 1.0      # Hz
+        clicked_point_topic: '/clicked_point'
+        pd_max_distance_threshold: 0.15
+        pd_normal_similarity_threshold: 15.0
+        publish_det_plane: false
+
+      # ── Object Detection ──────────────────────────────────────────────────────
+      object_detection:
+        od_enabled: false
+        enable_tracking: true
+        detection_model: 'MULTI_CLASS_BOX_FAST'  # 'MULTI_CLASS_BOX_FAST' | 'MULTI_CLASS_BOX_MEDIUM'
+                                                  # 'MULTI_CLASS_BOX_ACCURATE' | 'PERSON_HEAD_BOX_FAST'
+                                                  # 'PERSON_HEAD_BOX_ACCURATE' | 'CUSTOM_YOLOLIKE_BOX_OBJECTS'
+        max_range: 40.0                 # m, cannot exceed depth.max_depth
+        filtering_mode: 'NMS3D'         # 'NONE' | 'NMS3D' | 'NMS3D_PER_CLASS'
+        prediction_timeout: 2.0         # s (0 = disable SDK predictions)
+        allow_reduced_precision_inference: false
+        # Per-class confidence thresholds (from object_detection.yaml)
+        class:
+          people:
+            enabled: true
+            confidence_threshold: 65.0  # [DYNAMIC]
+          vehicle:
+            enabled: true
+            confidence_threshold: 60.0  # [DYNAMIC]
+          bag:
+            enabled: true
+            confidence_threshold: 40.0  # [DYNAMIC]
+          animal:
+            enabled: true
+            confidence_threshold: 40.0  # [DYNAMIC]
+          electronics:
+            enabled: true
+            confidence_threshold: 45.0  # [DYNAMIC]
+          fruit_vegetable:
+            enabled: true
+            confidence_threshold: 50.0  # [DYNAMIC]
+          sport:
+            enabled: true
+            confidence_threshold: 30.0  # [DYNAMIC]
+        # Custom ONNX model (used when detection_model is 'CUSTOM_YOLOLIKE_BOX_OBJECTS')
+        custom_onnx_file: ''
+        custom_onnx_input_size: 512
+        custom_class_count: 0
+        # Add custom classes below as class_000, class_001, … following this template:
+        # class_000:
+        #   label: 'person'
+        #   model_class_id: 0
+        #   enabled: true
+        #   confidence_threshold: 50.0
+        #   is_grounded: true
+        #   is_static: false
+        #   tracking_timeout: -1.0
+        #   tracking_max_dist: -1.0
+        #   max_box_width_normalized: -1.0
+        #   min_box_width_normalized: -1.0
+        #   max_box_height_normalized: -1.0
+        #   min_box_height_normalized: -1.0
+        #   max_box_width_meters: -1.0
+        #   min_box_width_meters: -1.0
+        #   max_box_height_meters: -1.0
+        #   min_box_height_meters: -1.0
+        #   object_acceleration_preset: 'DEFAULT'
+        #   max_allowed_acceleration: 100000.0
+        #   velocity_smoothing_factor: 0.5
+        #   min_velocity_threshold: 0.2
+        #   prediction_timeout_s: 0.5
+        #   min_confirmation_time_s: 0.05
+
+      # ── Body Tracking ─────────────────────────────────────────────────────────
+      body_tracking:
+        bt_enabled: false
+        model: 'HUMAN_BODY_MEDIUM'      # 'HUMAN_BODY_FAST' | 'HUMAN_BODY_MEDIUM' | 'HUMAN_BODY_ACCURATE'
+        body_format: 'BODY_38'          # 'BODY_18' | 'BODY_34' | 'BODY_38'
+        allow_reduced_precision_inference: false
+        max_range: 15.0                 # m
+        body_kp_selection: 'FULL'       # 'FULL' | 'UPPER_BODY'
+        enable_body_fitting: false
+        enable_tracking: true
+        prediction_timeout_s: 0.5
+        confidence_threshold: 50.0      # [DYNAMIC] [0,99]
+        minimum_keypoints_threshold: 5  # [DYNAMIC]
+
+      # ── Stream Server ─────────────────────────────────────────────────────────
+      stream_server:
+        stream_enabled: false
+        codec: 'H265'                   # 'H264' | 'H265'
+        port: 30000                     # must be even
+        bitrate: 12500                  # [1000, 60000] Kbits/s
+        gop_size: -1                    # max 256
+        adaptative_bitrate: false
+        chunk_size: 16084               # [1024, 65000]
+        target_framerate: 0             # 0 = camera FPS
+
+      # ── Advanced ──────────────────────────────────────────────────────────────
+      advanced:  # WARNING: do not modify unless you know what you are doing
+        thread_sched_policy: 'SCHED_BATCH'  # 'SCHED_OTHER' | 'SCHED_BATCH' | 'SCHED_FIFO' | 'SCHED_RR'
+        thread_grab_priority: 50             # ONLY with SCHED_FIFO/RR [1-99]
+        thread_sensor_priority: 70           # ONLY with SCHED_FIFO/RR [1-99]
+        thread_pointcloud_priority: 60       # ONLY with SCHED_FIFO/RR [1-99]
+
+      # ── Debug ─────────────────────────────────────────────────────────────────
+      debug:
+        sdk_verbose: 1
+        sdk_verbose_log_file: ''
+        use_pub_timestamps: false
+        debug_common: false
+        debug_dyn_params: false
+        debug_grab: false
+        debug_sim: false
+        debug_video_depth: false
+        debug_camera_controls: false
+        debug_point_cloud: false
+        debug_tf: false
+        debug_positional_tracking: false
+        debug_gnss: false
+        debug_sensors: false
+        debug_mapping: false
+        debug_terrain_mapping: false
+        debug_object_detection: false
+        debug_body_tracking: false
+        debug_roi: false
+        debug_streaming: false
+        debug_advanced: false
+        debug_nitros: false
+        disable_nitros: false

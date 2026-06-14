@@ -1,6 +1,11 @@
+# Workspace-level Isaac ROS CLI config.
+# When adding or removing a Docker layer, update BOTH:
+#   - additional_image_keys below
+#   - image_key_order in scripts/.build_image_layers.yaml  (must stay in sync)
 docker:
   run:
     container_name: zed_dev_container
   image:
     additional_image_keys:
       - zed
+      - dependency

@@ -1,0 +1,26 @@
+# Build image layer configuration for isaac-ros activate --build-local.
+# This file is picked up by the isaac-ros CLI before /etc/isaac-ros-cli/.build_image_layers.yaml.
+#
+# image_key_order: defines the build sequence for the image layers.
+#   Keys match base_image_keys + additional_image_keys from scripts/.isaac-ros-cli/config.yaml.
+#   When adding or removing a layer, update BOTH files — they are read by separate CLI loaders.
+#
+# context_overrides: per-layer Docker build context, expressed as a path
+# relative to the directory in which the matching Dockerfile was found.
+#
+#   isaac_ros / noble  → kept from the upstream default (their Dockerfiles live in
+#                        /etc/isaac-ros-cli/docker and reference files one level up)
+#   dependency         → set to ../.. so the workspace root is the build context,
+#                        enabling `COPY src/<pkg>/package.xml` inside the Dockerfile
+image_key_order:
+  - isaac_ros.zed.dependency
+
+context_overrides:
+  isaac_ros: ..
+  noble: ..
+  dependency: ../..
+
+cache_to_registry_names: []
+cache_from_registry_names:
+  - nvcr.io/nvidia/isaac/ros
+remote_builder: {}

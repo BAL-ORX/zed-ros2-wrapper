@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1
+# zed_wrapper dependency layer — installs ROS 2 and system packages required
+# by the zed-ros2-wrapper packages.
+#
+# This Dockerfile is discovered via scripts/.isaac_ros_common-config and
+# layered on top of the base Isaac ROS image by `isaac-ros activate --build-local`.
+#
+# To rebuild after changing this file:
+#   ./run_dev.sh --rebuild
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Install apt packages needed by the workspace
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-rqt-image-view \
+    ros-jazzy-rviz2 \
+    ros-jazzy-rmw-cyclonedds-cpp \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-install all rosdep dependencies so colcon build doesn't need a network call.
+# Only package.xml files are copied here — source changes don't bust this cache layer.
+COPY src/zed_components/package.xml  /tmp/ros_deps/zed_components/package.xml
+COPY src/zed_wrapper/package.xml     /tmp/ros_deps/zed_wrapper/package.xml
+COPY src/zed_ros2/package.xml        /tmp/ros_deps/zed_ros2/package.xml
+COPY src/zed_debug/package.xml       /tmp/ros_deps/zed_debug/package.xml
+
+RUN apt-get update \
+    && rosdep update \
+    && rosdep install --from-paths /tmp/ros_deps --ignore-src -r -y \
+    && rm -rf /tmp/ros_deps /var/lib/apt/lists/*

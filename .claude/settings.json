@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat /etc/isaac-ros-cli/config.yaml)",
+      "Read(//etc/isaac-ros-cli/**)",
+      "Bash(cat /usr/bin/isaac-ros | head -100)",
+      "Read(//usr/bin/**)",
+      "Bash(python3 -c \"import isaac_ros_cli; print\\(isaac_ros_cli.__file__\\)\")",
+      "Bash(grep -r \"build_context\\\\|context\\\\|COPY\\\\|WORKSPACE\\\\|ISAAC_DIR\" /usr/lib/python3/dist-packages/isaac_ros_cli/ 2>/dev/null | grep -i \"context\\\\|build_dir\\\\|dockerfile\" | head -30)",
+      "Read(//usr/lib/python3/dist-packages/isaac_ros_cli/**)",
+      "Bash(grep -n \"build_context\\\\|context\\\\|COPY\\\\|isaac.dir\\\\|isaac_dir\" /usr/lib/isaac-ros-cli/run_dev.py | head -40)",
+      "Read(//usr/lib/isaac-ros-cli/**)",
+      "Bash(python3 -c \"from build_image_layers import get_isaac_ros_common_config_path; print\\(get_isaac_ros_common_config_path\\(\\)\\)\")",
+      "Bash(cat /usr/share/isaac-ros-cli/config.yaml)",
+      "Read(//usr/share/isaac-ros-cli/**)",
+      "Bash(dpkg -l)"
+    ]
+  }
+}

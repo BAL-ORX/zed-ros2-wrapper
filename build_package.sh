@@ -1,8 +1,3 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-sudo apt update
-rosdep update
-rosdep install --from-paths src --ignore-src -r -y
-colcon build --symlink-install --base-paths src/ --cmake-args=-DCMAKE_BUILD_TYPE=Release --parallel-workers $(nproc)
-source install/local_setup.bash
+# Canonical location is scripts/build_package.sh — this wrapper delegates there.
+exec "$(dirname "${BASH_SOURCE[0]}")/scripts/build_package.sh" "$@"
