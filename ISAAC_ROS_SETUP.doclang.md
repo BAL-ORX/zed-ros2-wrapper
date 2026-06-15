@@ -107,30 +107,48 @@ purposes. An agent MUST keep them in sync.
 **Invariant:** Every key in `additional_image_keys` MUST appear (with the
 `isaac_ros.` prefix stripped) somewhere in `image_key_order`, and vice versa.
 
-## Docker args loading order
+## Docker args loading — CLI limitation and workaround
 
-When `isaac-ros activate` starts the container it merges docker run flags from
-three sources in this order:
+`/usr/lib/isaac-ros-cli/run_dev.py` collects docker run flags from these
+sources (read in order, Docker uses the **last** occurrence of any `-e KEY`):
 
 ```
-Position 1 — $DOCKER_ARGS_FILE          (set by run_dev / deploy scripts — loaded FIRST)
-Position 2 — ~/.isaac_ros_dev-dockerargs (user-level)
-Position 3 — scripts/.isaac_ros_dev-dockerargs  (workspace — loaded LAST)
+Position 1 — $DOCKER_ARGS_FILE                   (always read — reliable)
+Position 2 — ~/.isaac_ros_dev-dockerargs          (user-level, optional)
+Position 3 — $ISAAC_ROS_WS/scripts/.isaac_ros_dev-dockerargs  OR
+             /etc/isaac-ros-cli/.isaac_ros_dev-dockerargs     (fallback)
 ```
 
-Docker uses the **last** occurrence of any `-e KEY=value` flag. This means
-position 3 (workspace file) normally wins over position 1.
+**Known CLI bug:** two modules in the CLI interpret `ISAAC_ROS_WS` differently:
 
-**CycloneDDS exception:** `CYCLONEDDS_URI` is intentionally absent from
-position 3. The scripts write it only to position 1 (via a temp file in
-`$DOCKER_ARGS_FILE`). Because no later source overrides it, the value from
-position 1 is used. This enables the `CYCLONEDDS_PROFILE` override mechanism
-without touching the workspace dockerargs file.
+| Module | Expects `ISAAC_ROS_WS` to be | Constructs path |
+|--------|------------------------------|-----------------|
+| `run_dev.py` (dockerargs) | workspace root | `$ISAAC_ROS_WS/scripts/.isaac_ros_dev-dockerargs` |
+| `isaac_ros_common_config_utils.py` (build config) | scripts dir | `$ISAAC_ROS_WS/../scripts/.build_image_layers.yaml` |
+
+These expectations are mutually exclusive. We set `ISAAC_ROS_WS="${WORKSPACE}/scripts"`
+to satisfy the build config loader. As a side effect, `run_dev.py` constructs
+`${WORKSPACE}/scripts/scripts/.isaac_ros_dev-dockerargs` (double `scripts/`),
+which does not exist, so it falls back to `/etc/isaac-ros-cli/.isaac_ros_dev-dockerargs`
+(which only mounts user home directories — not our env vars).
+
+**Workaround:** `run_dev_<SUFFIX>.sh` and `deploy_<SUFFIX>.sh` read
+`scripts/.isaac_ros_dev-dockerargs` themselves (stripping comments/blanks with
+`grep`) and write its content into the `$DOCKER_ARGS_FILE` temp file, which IS
+always reliably read at position 1. `CYCLONEDDS_URI` is appended after.
+
+```
+DOCKER_ARGS_FILE temp file (position 1) contains:
+  1. content of scripts/.isaac_ros_dev-dockerargs  (--privileged, -e RMW_IMPLEMENTATION, …)
+  2. -e CYCLONEDDS_URI=…  (resolved from CYCLONEDDS_PROFILE or workspace XML)
+  [deploy only: --detach prepended at the top]
+```
 
 ## CycloneDDS configuration
 
 The container always uses CycloneDDS as RMW:
-`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` (set in `scripts/.isaac_ros_dev-dockerargs`).
+`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` (set in `scripts/.isaac_ros_dev-dockerargs`,
+injected via `DOCKER_ARGS_FILE` by the run/deploy scripts).
 
 `CYCLONEDDS_URI` resolution at container start:
 
@@ -139,8 +157,8 @@ if $CYCLONEDDS_PROFILE is set on the host:
     → mount that file as /cyclone_profile.xml (read-only) inside container
     → set CYCLONEDDS_URI=/cyclone_profile.xml
 else:
-    → set CYCLONEDDS_URI=/workspaces/isaac_ros-dev/<cyclone_profile_file>
-       (the project's own cyclone_profile_<suffix>.xml, visible via bind-mount)
+    → set CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_<SUFFIX>.xml
+       (the project's own XML file, visible via bind-mount)
 ```
 
 This lets a single DDS config be shared across multiple projects by setting
@@ -157,9 +175,10 @@ This lets a single DDS config be shared across multiple projects by setting
 
 ### What happens (in order)
 
-1. Sources `<project>.env` to get `REGISTRY` and `PROJECT_NAME`.
-2. Builds a temp `$DOCKER_ARGS_FILE` with `-e CYCLONEDDS_URI=...` (resolved
-   using `CYCLONEDDS_PROFILE` if set, else workspace XML).
+1. Sources `project_<SUFFIX>.env` to get `REGISTRY` and `PROJECT_NAME`.
+2. Builds a temp `$DOCKER_ARGS_FILE`:
+   - Reads `scripts/.isaac_ros_dev-dockerargs` (strips comments/blanks) and appends all lines.
+   - Appends `-e CYCLONEDDS_URI=...` (resolved from `CYCLONEDDS_PROFILE` or workspace XML).
 3. Checks for `cached_isaac_run_dev_image_local:latest` locally.
    - If found → skip to step 5.
    - If not found → attempt `docker pull ${REGISTRY}/${PROJECT_NAME}:dev`.
@@ -207,9 +226,9 @@ ros2 launch $LAUNCH_PKG $LAUNCH_FILE
 ```
 
 `deploy_<suffix>.sh` behaviour:
-1. If the container is not running → start it in `--detach` mode (combined
-   with CycloneDDS args in a single `$DOCKER_ARGS_FILE`), register a
-   `trap` to stop it on exit.
+1. If the container is not running → build a `$DOCKER_ARGS_FILE` containing
+   `--detach`, all lines from `scripts/.isaac_ros_dev-dockerargs`, and
+   `CYCLONEDDS_URI`. Start the container, then register a `trap` to stop it on exit.
 2. Check inside the container whether a colcon build exists
    (`install/$LAUNCH_PKG/share/$LAUNCH_PKG/package.xml`). If not → build first.
 3. `docker exec` the launch command.
@@ -348,8 +367,13 @@ CONFIG_DOCKER_SEARCH_DIRS=(/etc/isaac-ros-cli/docker docker)
 -e ROS_DOMAIN_ID=1
 ```
 
-MUST NOT contain `-e CYCLONEDDS_URI`. It is injected dynamically by the
-run/deploy scripts.
+Rules:
+- MUST NOT contain `-e CYCLONEDDS_URI` — injected dynamically by the run/deploy scripts.
+- Comments (lines starting with `#`) and blank lines are stripped by `grep` before
+  injection; they are safe to include for documentation.
+- The CLI does **not** read this file directly (see the `ISAAC_ROS_WS` ambiguity in
+  `@architecture`). The run/deploy scripts read it with `grep` and pipe it into
+  `$DOCKER_ARGS_FILE` instead.
 
 ## Step 10 — Create `cyclone_profile_<SUFFIX>.xml`
 
@@ -429,16 +453,21 @@ source "${WORKSPACE}/project_<SUFFIX>.env"
 DEV_IMAGE="${REGISTRY}/${PROJECT_NAME}:dev"
 CACHED="cached_isaac_run_dev_image_local:latest"
 
-_CYCLONE_ARGS=$(mktemp)
+# Build DOCKER_ARGS_FILE — the CLI reliably reads this (position 1).
+# We self-read scripts/.isaac_ros_dev-dockerargs here because the CLI's native
+# discovery of that file is broken by the ISAAC_ROS_WS ambiguity (see @architecture).
+_DOCKER_ARGS=$(mktemp)
+grep -v '^\s*#' "${WORKSPACE}/scripts/.isaac_ros_dev-dockerargs" | \
+    grep -v '^\s*$' >> "${_DOCKER_ARGS}"
 if [[ -n "${CYCLONEDDS_PROFILE:-}" ]]; then
     [[ -f "${CYCLONEDDS_PROFILE}" ]] || \
         { echo "[run_dev] ERROR: CYCLONEDDS_PROFILE not found: ${CYCLONEDDS_PROFILE}"; exit 1; }
-    echo "-v ${CYCLONEDDS_PROFILE}:/cyclone_profile.xml:ro" >> "${_CYCLONE_ARGS}"
-    echo "-e CYCLONEDDS_URI=/cyclone_profile.xml" >> "${_CYCLONE_ARGS}"
+    echo "-v ${CYCLONEDDS_PROFILE}:/cyclone_profile.xml:ro" >> "${_DOCKER_ARGS}"
+    echo "-e CYCLONEDDS_URI=/cyclone_profile.xml" >> "${_DOCKER_ARGS}"
 else
-    echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_<SUFFIX>.xml" >> "${_CYCLONE_ARGS}"
+    echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_<SUFFIX>.xml" >> "${_DOCKER_ARGS}"
 fi
-export DOCKER_ARGS_FILE="${_CYCLONE_ARGS}"
+export DOCKER_ARGS_FILE="${_DOCKER_ARGS}"
 
 if [[ "${1:-}" == "--rebuild" ]]; then
     shift
@@ -495,6 +524,8 @@ HEREDOC
 if ! docker ps --quiet --filter "name=^/${CONTAINER}$" | grep -q .; then
     _DETACH_ARGS=$(mktemp)
     echo "--detach" > "${_DETACH_ARGS}"
+    grep -v '^\s*#' "${WORKSPACE}/scripts/.isaac_ros_dev-dockerargs" | \
+        grep -v '^\s*$' >> "${_DETACH_ARGS}"
     if [[ -n "${CYCLONEDDS_PROFILE:-}" ]]; then
         [[ -f "${CYCLONEDDS_PROFILE}" ]] || \
             { echo "[deploy] ERROR: CYCLONEDDS_PROFILE not found: ${CYCLONEDDS_PROFILE}"; exit 1; }
@@ -533,7 +564,8 @@ each constraint after making changes.
 | C7 | `.dockerignore` MUST exclude `build/`, `install/`, `log/`, `.git/`. |
 | C8 | Only `package.xml` files are COPY-ed in the Dockerfile — never source files. |
 | C9 | `scripts/build_package.sh` is generic and MUST NOT be edited per project. |
-| C10 | `ISAAC_ROS_WS` MUST point to `WORKSPACE/scripts` when calling `isaac-ros activate`. |
+| C10 | `ISAAC_ROS_WS` MUST be `WORKSPACE/scripts` for all `isaac-ros activate` calls (required by `isaac_ros_common_config_utils.py` for build config discovery). |
+| C11 | `scripts/.isaac_ros_dev-dockerargs` MUST be read by the run/deploy scripts via `grep` and injected into `$DOCKER_ARGS_FILE` — never rely on the CLI to find it automatically. |
 
 
 # @validation
@@ -573,6 +605,12 @@ bash -n scripts/build_package.sh
 # 4. Constraint C1 — CYCLONEDDS_URI absent from workspace dockerargs
 grep -q 'CYCLONEDDS_URI' scripts/.isaac_ros_dev-dockerargs \
     && echo "VIOLATION C1: CYCLONEDDS_URI found in dockerargs"
+
+# 4b. Constraint C11 — run/deploy scripts self-read dockerargs via grep
+grep -q "grep.*isaac_ros_dev-dockerargs" run_dev_<SUFFIX>.sh \
+    || echo "VIOLATION C11: run_dev script does not self-read dockerargs"
+grep -q "grep.*isaac_ros_dev-dockerargs" deploy_<SUFFIX>.sh \
+    || echo "VIOLATION C11: deploy script does not self-read dockerargs"
 
 # 5. Constraint C5 — key sync between the two YAML files
 echo "additional_image_keys:"; \

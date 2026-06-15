@@ -23,24 +23,30 @@ source "${WORKSPACE}/project_orx.env"
 DEV_IMAGE="${REGISTRY}/${PROJECT_NAME}:dev"
 CACHED="cached_isaac_run_dev_image_local:latest"
 
-# ── CycloneDDS docker args ────────────────────────────────────────────────────
-# Inject CYCLONEDDS_URI via DOCKER_ARGS_FILE so it is set AFTER the workspace
-# .isaac_ros_dev-dockerargs (which no longer sets it), giving this the final say.
-#
+# ── Docker args ───────────────────────────────────────────────────────────────
+# The Isaac ROS CLI reads dockerargs from $ISAAC_ROS_WS/scripts/.isaac_ros_dev-dockerargs,
+# but run_dev.py and isaac_ros_common_config_utils.py disagree on what ISAAC_ROS_WS means
+# (workspace root vs scripts/ dir). We work around this by reading the file ourselves
+# and injecting all flags via DOCKER_ARGS_FILE, which is always reliably read.
+_DOCKER_ARGS=$(mktemp)
+
+# Static flags from the workspace dockerargs file
+grep -v '^\s*#' "${WORKSPACE}/scripts/.isaac_ros_dev-dockerargs" | \
+    grep -v '^\s*$' >> "${_DOCKER_ARGS}"
+
+# CycloneDDS URI — injected here so CYCLONEDDS_PROFILE can override per-invocation.
 # If CYCLONEDDS_PROFILE is set on the host, mount that file into the container
-# and point CycloneDDS at it — useful for sharing one config across projects.
-# Otherwise fall back to cyclone_profile_orx.xml at the workspace root.
-_CYCLONE_ARGS=$(mktemp)
+# and point CycloneDDS at it — useful for sharing one DDS config across projects.
 if [[ -n "${CYCLONEDDS_PROFILE:-}" ]]; then
     [[ -f "${CYCLONEDDS_PROFILE}" ]] || \
         { echo "[run_dev] ERROR: CYCLONEDDS_PROFILE not found: ${CYCLONEDDS_PROFILE}"; exit 1; }
-    echo "-v ${CYCLONEDDS_PROFILE}:/cyclone_profile.xml:ro" >> "${_CYCLONE_ARGS}"
-    echo "-e CYCLONEDDS_URI=/cyclone_profile.xml" >> "${_CYCLONE_ARGS}"
+    echo "-v ${CYCLONEDDS_PROFILE}:/cyclone_profile.xml:ro" >> "${_DOCKER_ARGS}"
+    echo "-e CYCLONEDDS_URI=/cyclone_profile.xml" >> "${_DOCKER_ARGS}"
     echo "[run_dev] Using external CycloneDDS profile: ${CYCLONEDDS_PROFILE}"
 else
-    echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_orx.xml" >> "${_CYCLONE_ARGS}"
+    echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_orx.xml" >> "${_DOCKER_ARGS}"
 fi
-export DOCKER_ARGS_FILE="${_CYCLONE_ARGS}"
+export DOCKER_ARGS_FILE="${_DOCKER_ARGS}"
 
 # ── Image resolution ─────────────────────────────────────────────────────────
 # The goal is to always end up with a valid cached_isaac_run_dev_image_local:latest

@@ -59,14 +59,16 @@ if ! docker ps --quiet --filter "name=^/${CONTAINER}$" | grep -q .; then
     # and set it exclusively here).
     _DETACH_ARGS=$(mktemp)
     echo "--detach" > "${_DETACH_ARGS}"
+    grep -v '^\s*#' "${WORKSPACE}/scripts/.isaac_ros_dev-dockerargs" | \
+        grep -v '^\s*$' >> "${_DETACH_ARGS}"
     if [[ -n "${CYCLONEDDS_PROFILE:-}" ]]; then
         [[ -f "${CYCLONEDDS_PROFILE}" ]] || \
             { echo "[deploy] ERROR: CYCLONEDDS_PROFILE not found: ${CYCLONEDDS_PROFILE}"; exit 1; }
-        printf -- '-v\n%s:/cyclone_profile.xml:ro\n' "${CYCLONEDDS_PROFILE}" >> "${_DETACH_ARGS}"
-        printf -- '-e\nCYCLONEDDS_URI=/cyclone_profile.xml\n' >> "${_DETACH_ARGS}"
+        echo "-v ${CYCLONEDDS_PROFILE}:/cyclone_profile.xml:ro" >> "${_DETACH_ARGS}"
+        echo "-e CYCLONEDDS_URI=/cyclone_profile.xml" >> "${_DETACH_ARGS}"
         echo "[deploy] Using external CycloneDDS profile: ${CYCLONEDDS_PROFILE}"
     else
-        printf -- '-e\nCYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_orx.xml\n' >> "${_DETACH_ARGS}"
+        echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_orx.xml" >> "${_DETACH_ARGS}"
     fi
 
     DOCKER_ARGS_FILE="${_DETACH_ARGS}" \
