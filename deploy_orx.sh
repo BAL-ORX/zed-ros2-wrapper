@@ -17,7 +17,7 @@ set -euo pipefail
 WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Project-specific values (PROJECT_NAME, REGISTRY, LAUNCH_PKG, LAUNCH_FILE)
-source "${WORKSPACE}/project_env_orx"
+source "${WORKSPACE}/project_orx.env"
 
 # Allow the launch file to be overridden as the first argument
 LAUNCH_FILE="${1:-${LAUNCH_FILE}}"
@@ -62,11 +62,11 @@ if ! docker ps --quiet --filter "name=^/${CONTAINER}$" | grep -q .; then
     if [[ -n "${CYCLONEDDS_PROFILE:-}" ]]; then
         [[ -f "${CYCLONEDDS_PROFILE}" ]] || \
             { echo "[deploy] ERROR: CYCLONEDDS_PROFILE not found: ${CYCLONEDDS_PROFILE}"; exit 1; }
-        echo "-v ${CYCLONEDDS_PROFILE}:/cyclone_profile.xml:ro" >> "${_DETACH_ARGS}"
-        echo "-e CYCLONEDDS_URI=/cyclone_profile.xml" >> "${_DETACH_ARGS}"
+        printf -- '-v\n%s:/cyclone_profile.xml:ro\n' "${CYCLONEDDS_PROFILE}" >> "${_DETACH_ARGS}"
+        printf -- '-e\nCYCLONEDDS_URI=/cyclone_profile.xml\n' >> "${_DETACH_ARGS}"
         echo "[deploy] Using external CycloneDDS profile: ${CYCLONEDDS_PROFILE}"
     else
-        echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_orx.xml" >> "${_DETACH_ARGS}"
+        printf -- '-e\nCYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_orx.xml\n' >> "${_DETACH_ARGS}"
     fi
 
     DOCKER_ARGS_FILE="${_DETACH_ARGS}" \

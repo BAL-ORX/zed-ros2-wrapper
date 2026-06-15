@@ -10,7 +10,7 @@ A reproducible Docker-based workflow for ROS 2 development on top of the [Isaac 
 run_dev_orx.sh          — start (or rebuild) the dev container
 deploy_orx.sh           — build the ROS 2 package and run a launch file inside the container
 build_package_orx.sh — thin wrapper that delegates to scripts/build_package.sh
-project_env_orx         — single source of truth for project identity (registry, package, launch file)
+project_orx.env         — single source of truth for project identity (registry, package, launch file)
 cyclone_profile_orx.xml — CycloneDDS network config (network interface, multicast, buffers)
 
 scripts/
@@ -35,7 +35,7 @@ scripts/
 What it does, in order:
 
 1. Checks for a locally cached image (`cached_isaac_run_dev_image_local:latest`).
-2. If none exists, pulls the pre-built image from the registry defined in `project_env_orx`.
+2. If none exists, pulls the pre-built image from the registry defined in `project_orx.env`.
 3. If the pull fails, builds the image locally from `Dockerfile.dependency`.
 4. Injects CycloneDDS configuration (see [CycloneDDS](#cyclonedds)).
 5. Starts the container via `isaac-ros activate` and drops you into a shell at `/workspaces/isaac_ros-dev`.
@@ -68,7 +68,7 @@ Or from the host in one command (builds if needed, then launches):
 ./deploy_orx.sh
 ```
 
-The default package and launch file come from `project_env_orx`. Pass a different launch file as the first argument:
+The default package and launch file come from `project_orx.env`. Pass a different launch file as the first argument:
 
 ```bash
 ./deploy_orx.sh other_launch.launch.py [launch_args...]
@@ -98,7 +98,7 @@ docker push <REGISTRY>/<PROJECT_NAME>:dev
 
 ## Configuration files
 
-### `project_env_orx` — project identity
+### `project_orx.env` — project identity
 
 Single source of truth sourced by both `run_dev_orx.sh` and `deploy_orx.sh`. The only file that changes between projects (aside from the Docker and CLI configs):
 
@@ -259,7 +259,7 @@ Copy this repository structure and change the following files:
 
 | File | What to change |
 |------|---------------|
-| `project_env_orx` | `PROJECT_NAME`, `REGISTRY`, `LAUNCH_PKG`, `LAUNCH_FILE` |
+| `project_orx.env` | `PROJECT_NAME`, `REGISTRY`, `LAUNCH_PKG`, `LAUNCH_FILE` |
 | `scripts/.isaac-ros-cli/config.yaml` | `container_name`, `additional_image_keys` |
 | `scripts/.build_image_layers.yaml` | `image_key_order` (must mirror `additional_image_keys`) |
 | `scripts/docker/Dockerfile.dependency` | apt packages, `COPY src/<pkg>/package.xml` lines |

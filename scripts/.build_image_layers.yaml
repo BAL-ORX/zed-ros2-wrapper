@@ -1,3 +1,4 @@
+# This file is only necessary when you build three or more layers in the image.
 # Build image layer configuration for isaac-ros activate --build-local.
 # This file is picked up by the isaac-ros CLI before /etc/isaac-ros-cli/.build_image_layers.yaml.
 #

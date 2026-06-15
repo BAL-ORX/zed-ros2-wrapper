@@ -17,7 +17,7 @@ set -euo pipefail
 WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Project-specific values (PROJECT_NAME, REGISTRY, LAUNCH_PKG, LAUNCH_FILE)
-source "${WORKSPACE}/project_env_orx"
+source "${WORKSPACE}/project_orx.env"
 
 # Image published by CI to the container registry
 DEV_IMAGE="${REGISTRY}/${PROJECT_NAME}:dev"
