@@ -1,4 +1,4 @@
-# orx_zed_config.yaml — single configuration file for orx_zed_camera.launch.py
+# config_orx.yaml — single configuration file for orx_zed_camera.launch.py
 #
 # Place this file at the workspace root (/workspaces/isaac_ros-dev/ inside the container).
 # Pass a different path with:

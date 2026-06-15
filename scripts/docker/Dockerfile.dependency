@@ -6,7 +6,7 @@
 # layered on top of the base Isaac ROS image by `isaac-ros activate --build-local`.
 #
 # To rebuild after changing this file:
-#   ./run_dev.sh --rebuild
+#   ./run_dev_orx.sh --rebuild
 
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}

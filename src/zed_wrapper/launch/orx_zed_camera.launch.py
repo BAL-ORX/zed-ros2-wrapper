@@ -60,14 +60,14 @@ def launch_setup(context, *args, **kwargs):
 
 
 def generate_launch_description():
-    default_config = os.path.join('/workspaces/isaac_ros-dev', 'orx_zed_config.yaml')
+    default_config = os.path.join('/workspaces/isaac_ros-dev', 'config_orx.yaml')
 
     return LaunchDescription([
         DeclareLaunchArgument(
             'config_path',
             default_value=default_config,
             description='Path to the ORX ZED configuration YAML file. '
-                        'Defaults to orx_zed_config.yaml at the workspace root.'
+                        'Defaults to config_orx.yaml at the workspace root.'
         ),
         OpaqueFunction(function=launch_setup)
     ])

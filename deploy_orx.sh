@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# deploy.sh — build (if needed) and run a ROS 2 launch file in the Isaac ROS container.
+# deploy_orx.sh — build (if needed) and run a ROS 2 launch file in the Isaac ROS container.
 #
-# If the dev container (from run_dev.sh) is already running, exec-s into it.
+# If the dev container (from run_dev_orx.sh) is already running, exec-s into it.
 # Otherwise uses `isaac-ros activate` to start it in the background.
 #
 # Usage:
-#   ./deploy.sh [LAUNCH_FILE [LAUNCH_ARGS...]]
-#   CYCLONEDDS_PROFILE=/path/to/dds.xml ./deploy.sh   # use an external CycloneDDS config
+#   ./deploy_orx.sh [LAUNCH_FILE [LAUNCH_ARGS...]]
+#   CYCLONEDDS_PROFILE=/path/to/dds.xml ./deploy_orx.sh   # use an external CycloneDDS config
 #
 # Examples:
-#   ./deploy.sh
-#   ./deploy.sh zed_camera.launch.py
+#   ./deploy_orx.sh
+#   ./deploy_orx.sh zed_camera.launch.py
 
 set -euo pipefail
 
 WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Project-specific values (PROJECT_NAME, REGISTRY, LAUNCH_PKG, LAUNCH_FILE)
-source "${WORKSPACE}/project.env"
+source "${WORKSPACE}/project_env_orx"
 
 # Allow the launch file to be overridden as the first argument
 LAUNCH_FILE="${1:-${LAUNCH_FILE}}"
@@ -66,7 +66,7 @@ if ! docker ps --quiet --filter "name=^/${CONTAINER}$" | grep -q .; then
         echo "-e CYCLONEDDS_URI=/cyclone_profile.xml" >> "${_DETACH_ARGS}"
         echo "[deploy] Using external CycloneDDS profile: ${CYCLONEDDS_PROFILE}"
     else
-        echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile.xml" >> "${_DETACH_ARGS}"
+        echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_orx.xml" >> "${_DETACH_ARGS}"
     fi
 
     DOCKER_ARGS_FILE="${_DETACH_ARGS}" \

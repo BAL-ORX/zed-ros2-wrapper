@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_dev.sh — start the Isaac ROS dev container for this workspace.
+# run_dev_orx.sh — start the Isaac ROS dev container for this workspace.
 #
 # Image resolution order:
 #   1. Already cached locally as cached_isaac_run_dev_image_local:latest → use it
@@ -7,17 +7,17 @@
 #   3. Build locally via isaac-ros activate (uses scripts/ config)       → tag + use it
 #
 # Usage:
-#   ./run_dev.sh                                        # normal start
-#   ./run_dev.sh --rebuild                              # force a local rebuild, then start
-#   CYCLONEDDS_PROFILE=/path/to/dds.xml ./run_dev.sh   # use an external CycloneDDS config
-#   ./run_dev.sh [activate flags]                       # any other flags forwarded to isaac-ros activate
+#   ./run_dev_orx.sh                                        # normal start
+#   ./run_dev_orx.sh --rebuild                              # force a local rebuild, then start
+#   CYCLONEDDS_PROFILE=/path/to/dds.xml ./run_dev_orx.sh   # use an external CycloneDDS config
+#   ./run_dev_orx.sh [activate flags]                       # any other flags forwarded to isaac-ros activate
 
 set -euo pipefail
 
 WORKSPACE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Project-specific values (PROJECT_NAME, REGISTRY, LAUNCH_PKG, LAUNCH_FILE)
-source "${WORKSPACE}/project.env"
+source "${WORKSPACE}/project_env_orx"
 
 # Image published by CI to the container registry
 DEV_IMAGE="${REGISTRY}/${PROJECT_NAME}:dev"
@@ -29,7 +29,7 @@ CACHED="cached_isaac_run_dev_image_local:latest"
 #
 # If CYCLONEDDS_PROFILE is set on the host, mount that file into the container
 # and point CycloneDDS at it — useful for sharing one config across projects.
-# Otherwise fall back to cyclone_profile.xml at the workspace root.
+# Otherwise fall back to cyclone_profile_orx.xml at the workspace root.
 _CYCLONE_ARGS=$(mktemp)
 if [[ -n "${CYCLONEDDS_PROFILE:-}" ]]; then
     [[ -f "${CYCLONEDDS_PROFILE}" ]] || \
@@ -38,7 +38,7 @@ if [[ -n "${CYCLONEDDS_PROFILE:-}" ]]; then
     echo "-e CYCLONEDDS_URI=/cyclone_profile.xml" >> "${_CYCLONE_ARGS}"
     echo "[run_dev] Using external CycloneDDS profile: ${CYCLONEDDS_PROFILE}"
 else
-    echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile.xml" >> "${_CYCLONE_ARGS}"
+    echo "-e CYCLONEDDS_URI=/workspaces/isaac_ros-dev/cyclone_profile_orx.xml" >> "${_CYCLONE_ARGS}"
 fi
 export DOCKER_ARGS_FILE="${_CYCLONE_ARGS}"
 

@@ -7,11 +7,11 @@ A reproducible Docker-based workflow for ROS 2 development on top of the [Isaac 
 ## File layout
 
 ```
-run_dev.sh          — start (or rebuild) the dev container
-deploy.sh           — build the ROS 2 package and run a launch file inside the container
-build_package.sh    — thin wrapper that delegates to scripts/build_package.sh
-project.env         — single source of truth for project identity (registry, package, launch file)
-cyclone_profile.xml — CycloneDDS network config (network interface, multicast, buffers)
+run_dev_orx.sh          — start (or rebuild) the dev container
+deploy_orx.sh           — build the ROS 2 package and run a launch file inside the container
+build_package_orx.sh — thin wrapper that delegates to scripts/build_package.sh
+project_env_orx         — single source of truth for project identity (registry, package, launch file)
+cyclone_profile_orx.xml — CycloneDDS network config (network interface, multicast, buffers)
 
 scripts/
   build_package.sh               — colcon build (no rosdep, no network)
@@ -29,13 +29,13 @@ scripts/
 ### 1. Start the dev container
 
 ```bash
-./run_dev.sh
+./run_dev_orx.sh
 ```
 
 What it does, in order:
 
 1. Checks for a locally cached image (`cached_isaac_run_dev_image_local:latest`).
-2. If none exists, pulls the pre-built image from the registry defined in `project.env`.
+2. If none exists, pulls the pre-built image from the registry defined in `project_env_orx`.
 3. If the pull fails, builds the image locally from `Dockerfile.dependency`.
 4. Injects CycloneDDS configuration (see [CycloneDDS](#cyclonedds)).
 5. Starts the container via `isaac-ros activate` and drops you into a shell at `/workspaces/isaac_ros-dev`.
@@ -49,7 +49,7 @@ The workspace root is bind-mounted at `/workspaces/isaac_ros-dev` — edits on t
 bash scripts/build_package.sh
 
 # Or from the host (delegates to the same script):
-bash build_package.sh
+bash build_package_orx.sh
 ```
 
 This runs `colcon build --symlink-install`. With `--symlink-install`, Python and launch files are symlinked so you do not need to rebuild after editing them — only C++ changes require a rebuild.
@@ -65,13 +65,13 @@ ros2 launch <LAUNCH_PKG> <LAUNCH_FILE>
 Or from the host in one command (builds if needed, then launches):
 
 ```bash
-./deploy.sh
+./deploy_orx.sh
 ```
 
-The default package and launch file come from `project.env`. Pass a different launch file as the first argument:
+The default package and launch file come from `project_env_orx`. Pass a different launch file as the first argument:
 
 ```bash
-./deploy.sh other_launch.launch.py [launch_args...]
+./deploy_orx.sh other_launch.launch.py [launch_args...]
 ```
 
 ---
@@ -81,7 +81,7 @@ The default package and launch file come from `project.env`. Pass a different la
 Rebuild when you modify `scripts/docker/Dockerfile.dependency` (new apt packages, changed `package.xml` dependencies):
 
 ```bash
-./run_dev.sh --rebuild
+./run_dev_orx.sh --rebuild
 ```
 
 This calls `isaac-ros activate --build-local`, builds all layers in the order defined in `scripts/.build_image_layers.yaml`, then:
@@ -98,9 +98,9 @@ docker push <REGISTRY>/<PROJECT_NAME>:dev
 
 ## Configuration files
 
-### `project.env` — project identity
+### `project_env_orx` — project identity
 
-Single source of truth sourced by both `run_dev.sh` and `deploy.sh`. The only file that changes between projects (aside from the Docker and CLI configs):
+Single source of truth sourced by both `run_dev_orx.sh` and `deploy_orx.sh`. The only file that changes between projects (aside from the Docker and CLI configs):
 
 ```bash
 PROJECT_NAME="my-project"               # used to name the registry image
@@ -160,7 +160,7 @@ Extra flags appended to every `docker run` call:
 -e ROS_DOMAIN_ID=1
 ```
 
-`CYCLONEDDS_URI` is intentionally absent here — it is injected dynamically by `run_dev.sh` and `deploy.sh` (see [CycloneDDS](#cyclonedds)).
+`CYCLONEDDS_URI` is intentionally absent here — it is injected dynamically by `run_dev_orx.sh` and `deploy_orx.sh` (see [CycloneDDS](#cyclonedds)).
 
 ### `scripts/docker/Dockerfile.dependency` — custom image layer
 
@@ -191,21 +191,21 @@ RUN apt-get update \
 
 ## CycloneDDS
 
-The container uses CycloneDDS as the ROS 2 middleware (`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`). The network interface, multicast, and socket buffer settings are in `cyclone_profile.xml` at the workspace root.
+The container uses CycloneDDS as the ROS 2 middleware (`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`). The network interface, multicast, and socket buffer settings are in `cyclone_profile_orx.xml` at the workspace root.
 
 **Default** — the workspace profile is used automatically; no action needed:
 
 ```bash
-./run_dev.sh
+./run_dev_orx.sh
 ```
 
 **External profile** — to share a single DDS config across multiple projects, set `CYCLONEDDS_PROFILE` on the host before running. The file is bind-mounted read-only into the container:
 
 ```bash
 export CYCLONEDDS_PROFILE=/shared/configs/robot_dds.xml
-./run_dev.sh
+./run_dev_orx.sh
 # or
-CYCLONEDDS_PROFILE=/shared/configs/robot_dds.xml ./deploy.sh
+CYCLONEDDS_PROFILE=/shared/configs/robot_dds.xml ./deploy_orx.sh
 ```
 
 **Socket buffer size warning** — if you see `failed to increase socket receive buffer size`, run on the host:
@@ -217,7 +217,7 @@ sudo sysctl -w net.core.rmem_default=10485760
 
 To make this persistent, add those two lines to `/etc/sysctl.d/99-cyclonedds.conf`.
 
-**Changing the network interface** — edit `cyclone_profile.xml`:
+**Changing the network interface** — edit `cyclone_profile_orx.xml`:
 
 ```xml
 <NetworkInterface name="eth0" multicast="true" />
@@ -244,12 +244,12 @@ Additional layers (e.g. a ZED SDK layer) can be inserted by listing them in `add
 When `isaac-ros activate` starts the container it collects docker run flags from three sources:
 
 ```
-1. $DOCKER_ARGS_FILE              loaded FIRST  (set by run_dev.sh / deploy.sh)
+1. $DOCKER_ARGS_FILE              loaded FIRST  (set by run_dev_orx.sh / deploy_orx.sh)
 2. ~/.isaac_ros_dev-dockerargs    user-level
 3. scripts/.isaac_ros_dev-dockerargs  loaded LAST (workspace defaults)
 ```
 
-Docker uses the **last** occurrence of `-e KEY=value`. Because `CYCLONEDDS_URI` is absent from source 3, the value written by `run_dev.sh` / `deploy.sh` into source 1 is the only occurrence and therefore takes effect — enabling the `CYCLONEDDS_PROFILE` override mechanism.
+Docker uses the **last** occurrence of `-e KEY=value`. Because `CYCLONEDDS_URI` is absent from source 3, the value written by `run_dev_orx.sh` / `deploy_orx.sh` into source 1 is the only occurrence and therefore takes effect — enabling the `CYCLONEDDS_PROFILE` override mechanism.
 
 ---
 
@@ -259,13 +259,13 @@ Copy this repository structure and change the following files:
 
 | File | What to change |
 |------|---------------|
-| `project.env` | `PROJECT_NAME`, `REGISTRY`, `LAUNCH_PKG`, `LAUNCH_FILE` |
+| `project_env_orx` | `PROJECT_NAME`, `REGISTRY`, `LAUNCH_PKG`, `LAUNCH_FILE` |
 | `scripts/.isaac-ros-cli/config.yaml` | `container_name`, `additional_image_keys` |
 | `scripts/.build_image_layers.yaml` | `image_key_order` (must mirror `additional_image_keys`) |
 | `scripts/docker/Dockerfile.dependency` | apt packages, `COPY src/<pkg>/package.xml` lines |
-| `cyclone_profile.xml` | `NetworkInterface name` (match your host NIC) |
+| `cyclone_profile_orx.xml` | `NetworkInterface name` (match your host NIC) |
 
-The scripts `run_dev.sh`, `deploy.sh`, and `scripts/build_package.sh` are fully generic and require no changes.
+The scripts `run_dev_orx.sh`, `deploy_orx.sh`, `build_package_orx.sh`, and `scripts/build_package.sh` are fully generic and require no changes.
 
 ---
 
@@ -273,10 +273,10 @@ The scripts `run_dev.sh`, `deploy.sh`, and `scripts/build_package.sh` are fully 
 
 | Task | Command |
 |------|---------|
-| Start dev container | `./run_dev.sh` |
-| Rebuild Docker image | `./run_dev.sh --rebuild` |
+| Start dev container | `./run_dev_orx.sh` |
+| Rebuild Docker image | `./run_dev_orx.sh --rebuild` |
 | Build ROS 2 package | `bash scripts/build_package.sh` |
-| Run default launch file | `./deploy.sh` |
-| Run a different launch file | `./deploy.sh other.launch.py [args]` |
-| Use an external DDS profile | `CYCLONEDDS_PROFILE=/path/to/dds.xml ./run_dev.sh` |
+| Run default launch file | `./deploy_orx.sh` |
+| Run a different launch file | `./deploy_orx.sh other.launch.py [args]` |
+| Use an external DDS profile | `CYCLONEDDS_PROFILE=/path/to/dds.xml ./run_dev_orx.sh` |
 | Push dev image to registry | `docker push <REGISTRY>/<PROJECT_NAME>:dev` |
