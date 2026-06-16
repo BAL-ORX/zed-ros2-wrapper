@@ -66,7 +66,8 @@ adapting to a new project, all of these change.
 | `LAUNCH_FILE` | Default `.launch.py` file inside `LAUNCH_PKG`. |
 | `CONTAINER_NAME` | Docker container name; must be unique per project on the same host. |
 | `NIC` | Host network interface name (e.g. `eth0`, `enp10s0`). Find with `ip link`. |
-| `cached_isaac_run_dev_image_local:latest` | The local Docker image tag that `isaac-ros activate --use-cached-build-image` looks for. |
+| `cached_isaac_run_dev_image_local:latest` | The machine-global Docker image tag that `isaac-ros activate --use-cached-build-image` looks for. Written as late as possible (just before `exec`/`activate`) to minimise the race window when multiple projects start simultaneously. |
+| `CACHED_LOCAL` | Project-specific tag: `cached_isaac_run_dev_image_local_${PROJECT_NAME}:latest`. Used for all image resolution and consistency checks; stamped to the global tag only at the last moment. |
 | `DEV_IMAGE` | Registry image: `${REGISTRY}/${PROJECT_NAME}:dev`. |
 | `CYCLONEDDS_PROFILE` | Optional host environment variable. If set, its value must be an absolute path to an external CycloneDDS XML config that will be mounted into the container. |
 
@@ -144,6 +145,25 @@ DOCKER_ARGS_FILE temp file (position 1) contains:
   [deploy only: --detach prepended at the top]
 ```
 
+## Multi-project cache — design
+
+`cached_isaac_run_dev_image_local:latest` is a **machine-global** Docker tag.
+Any `isaac-ros activate --build-local` on any project on the host overwrites it.
+All containers in this setup share `ROS_DOMAIN_ID=1` by design — they are
+intended to communicate with each other over ROS.
+
+**Simultaneous-startup safety:** each script maintains a **project-specific**
+tag `CACHED_LOCAL = cached_isaac_run_dev_image_local_${PROJECT_NAME}:latest` for
+all image resolution and consistency checks. The global tag is only written in
+the final line before `isaac-ros activate`, minimising the race window to a
+single `docker tag` call. Running two projects back-to-back (even seconds apart)
+is therefore safe; exact-same-instant startup has a negligible remaining window.
+
+**Consistency guard:** compares `CACHED_LOCAL` to `DEV_IMAGE` by image ID. If
+they differ (e.g. CI pushed a new image), the local tag is updated from
+`DEV_IMAGE` — instant, no network. `deploy` additionally handles the case where
+`CACHED_LOCAL` is missing entirely (no prior `run_dev`) by pulling `DEV_IMAGE`.
+
 ## CycloneDDS configuration
 
 The container always uses CycloneDDS as RMW:
@@ -179,14 +199,22 @@ This lets a single DDS config be shared across multiple projects by setting
 2. Builds a temp `$DOCKER_ARGS_FILE`:
    - Reads `scripts/.isaac_ros_dev-dockerargs` (strips comments/blanks) and appends all lines.
    - Appends `-e CYCLONEDDS_URI=...` (resolved from `CYCLONEDDS_PROFILE` or workspace XML).
-3. Checks for `cached_isaac_run_dev_image_local:latest` locally.
-   - If found → skip to step 5.
+3. Checks for `CACHED_LOCAL` (`cached_isaac_run_dev_image_local_${PROJECT_NAME}:latest`) locally.
+   - If found → skip to step 4b.
    - If not found → attempt `docker pull ${REGISTRY}/${PROJECT_NAME}:dev`.
-     - If pull succeeds → `docker tag` it as the local cache name → skip to step 5.
-     - If pull fails → build locally (step 4).
+     - If pull succeeds → `docker tag` it as `CACHED_LOCAL` → skip to step 4b.
+     - If pull fails → build locally (step 4 `--rebuild` path).
 4. `--rebuild` flag or pull failure: runs
    `isaac-ros activate --build-local` with `ISAAC_DIR=WORKSPACE` and
-   `ISAAC_ROS_WS=WORKSPACE/scripts`. Tags result as both local cache and `DEV_IMAGE`.
+   `ISAAC_ROS_WS=WORKSPACE/scripts`. Tags result as both `CACHED_LOCAL` and
+   `DEV_IMAGE`. Then runs GC: removes all
+   `nvcr.io/nvidia/isaac/ros[:/]*-dependency_*-amd64*` images whose ID no longer
+   matches the freshly built cache (stale rebuilds).
+4b. Consistency guard: compares `CACHED_LOCAL` to `DEV_IMAGE` by image ID. If
+    they differ (e.g. CI pushed a newer image), repoints `CACHED_LOCAL` to
+    `DEV_IMAGE` — instant, no network.
+4c. Stamps the global tag: `docker tag "${CACHED_LOCAL}" "${CACHED}"` — this is
+    the only moment the global tag is written, minimising the race window.
 5. Runs `isaac-ros activate --use-cached-build-image` with
    `DOCKER_ARGS_FILE` set → drops user into container shell at
    `/workspaces/isaac_ros-dev`.
@@ -226,7 +254,11 @@ ros2 launch $LAUNCH_PKG $LAUNCH_FILE
 ```
 
 `deploy_<suffix>.sh` behaviour:
-1. If the container is not running → build a `$DOCKER_ARGS_FILE` containing
+1. Consistency guard on `CACHED_LOCAL` (project-specific tag). Deploy can be
+   invoked without run_dev, so it guards independently. If `CACHED_LOCAL` is
+   missing entirely, it attempts to pull `DEV_IMAGE` first.
+2. Stamps global tag: `docker tag "${CACHED_LOCAL}" "${CACHED}"`.
+3. If the container is not running → build a `$DOCKER_ARGS_FILE` containing
    `--detach`, all lines from `scripts/.isaac_ros_dev-dockerargs`, and
    `CYCLONEDDS_URI`. Start the container, then register a `trap` to stop it on exit.
 2. Check inside the container whether a colcon build exists
@@ -452,6 +484,7 @@ source "${WORKSPACE}/project_<SUFFIX>.env"
 
 DEV_IMAGE="${REGISTRY}/${PROJECT_NAME}:dev"
 CACHED="cached_isaac_run_dev_image_local:latest"
+CACHED_LOCAL="cached_isaac_run_dev_image_local_${PROJECT_NAME}:latest"
 
 # Build DOCKER_ARGS_FILE — the CLI reliably reads this (position 1).
 # We self-read scripts/.isaac_ros_dev-dockerargs here because the CLI's native
@@ -473,17 +506,34 @@ if [[ "${1:-}" == "--rebuild" ]]; then
     shift
     ISAAC_DIR="${WORKSPACE}" ISAAC_ROS_WS="${WORKSPACE}/scripts" \
         isaac-ros activate --build-local "$@"
+    docker tag "${CACHED}" "${CACHED_LOCAL}"
     docker tag "${CACHED}" "${DEV_IMAGE}"
-elif ! docker image inspect "${CACHED}" &>/dev/null; then
+    _new_id=$(docker inspect --format '{{.Id}}' "${CACHED}")
+    while IFS=' ' read -r _tag _id; do
+        [[ "${_id}" != "${_new_id}" ]] && docker rmi "${_tag}" 2>/dev/null || true
+    done < <(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+        | grep -E 'nvcr\.io/nvidia/isaac/ros[:/].*-dependency_.*-amd64')
+    unset _new_id _tag _id
+elif ! docker image inspect "${CACHED_LOCAL}" &>/dev/null; then
     if docker pull "${DEV_IMAGE}"; then
-        docker tag "${DEV_IMAGE}" "${CACHED}"
+        docker tag "${DEV_IMAGE}" "${CACHED_LOCAL}"
     else
         ISAAC_DIR="${WORKSPACE}" ISAAC_ROS_WS="${WORKSPACE}/scripts" \
             isaac-ros activate --build-local "$@"
+        docker tag "${CACHED}" "${CACHED_LOCAL}"
         docker tag "${CACHED}" "${DEV_IMAGE}"
     fi
 fi
 
+_cached_id=$(docker inspect --format '{{.Id}}' "${CACHED_LOCAL}" 2>/dev/null || true)
+_dev_id=$(docker inspect --format '{{.Id}}' "${DEV_IMAGE}" 2>/dev/null || true)
+if [[ -n "${_dev_id}" && "${_cached_id}" != "${_dev_id}" ]]; then
+    echo "[run_dev] Updating local cache from ${DEV_IMAGE}..."
+    docker tag "${DEV_IMAGE}" "${CACHED_LOCAL}"
+fi
+unset _cached_id _dev_id
+
+docker tag "${CACHED_LOCAL}" "${CACHED}"
 export ISAAC_DIR="${WORKSPACE}"
 export ISAAC_ROS_WS="${WORKSPACE}/scripts"
 exec isaac-ros activate --use-cached-build-image "$@"
@@ -520,6 +570,22 @@ fi
 source "\${WS}/install/setup.bash"
 exec ros2 launch ${LAUNCH_PKG} ${LAUNCH_FILE}${LAUNCH_ARGS:+ ${LAUNCH_ARGS}}
 HEREDOC
+
+DEV_IMAGE="${REGISTRY}/${PROJECT_NAME}:dev"
+CACHED="cached_isaac_run_dev_image_local:latest"
+CACHED_LOCAL="cached_isaac_run_dev_image_local_${PROJECT_NAME}:latest"
+
+_cached_id=$(docker inspect --format '{{.Id}}' "${CACHED_LOCAL}" 2>/dev/null || true)
+_dev_id=$(docker inspect --format '{{.Id}}' "${DEV_IMAGE}" 2>/dev/null || true)
+if [[ -z "${_cached_id}" ]]; then
+    docker pull "${DEV_IMAGE}" && docker tag "${DEV_IMAGE}" "${CACHED_LOCAL}" \
+        || { echo "[deploy] ERROR: image not found. Run ./run_dev_<SUFFIX>.sh --rebuild"; exit 1; }
+elif [[ -n "${_dev_id}" && "${_cached_id}" != "${_dev_id}" ]]; then
+    echo "[deploy] Updating local cache from ${DEV_IMAGE}..."
+    docker tag "${DEV_IMAGE}" "${CACHED_LOCAL}"
+fi
+unset _cached_id _dev_id
+docker tag "${CACHED_LOCAL}" "${CACHED}"
 
 if ! docker ps --quiet --filter "name=^/${CONTAINER}$" | grep -q .; then
     _DETACH_ARGS=$(mktemp)
@@ -566,6 +632,7 @@ each constraint after making changes.
 | C9 | `scripts/build_package.sh` is generic and MUST NOT be edited per project. |
 | C10 | `ISAAC_ROS_WS` MUST be `WORKSPACE/scripts` for all `isaac-ros activate` calls (required by `isaac_ros_common_config_utils.py` for build config discovery). |
 | C11 | `scripts/.isaac_ros_dev-dockerargs` MUST be read by the run/deploy scripts via `grep` and injected into `$DOCKER_ARGS_FILE` — never rely on the CLI to find it automatically. |
+| C12 | run/deploy scripts MUST use a project-specific `CACHED_LOCAL` tag for all image resolution. The global `cached_isaac_run_dev_image_local:latest` MUST only be written in the single `docker tag` call immediately before `isaac-ros activate --use-cached-build-image`. |
 
 
 # @validation
@@ -611,6 +678,17 @@ grep -q "grep.*isaac_ros_dev-dockerargs" run_dev_<SUFFIX>.sh \
     || echo "VIOLATION C11: run_dev script does not self-read dockerargs"
 grep -q "grep.*isaac_ros_dev-dockerargs" deploy_<SUFFIX>.sh \
     || echo "VIOLATION C11: deploy script does not self-read dockerargs"
+
+# 4c. Constraint C12 — project-specific CACHED_LOCAL used in both scripts
+grep -q 'CACHED_LOCAL=.*PROJECT_NAME' run_dev_<SUFFIX>.sh \
+    || echo "VIOLATION C12: CACHED_LOCAL not defined in run_dev script"
+grep -q 'CACHED_LOCAL=.*PROJECT_NAME' deploy_<SUFFIX>.sh \
+    || echo "VIOLATION C12: CACHED_LOCAL not defined in deploy script"
+# Global CACHED stamped just before activate (last docker tag before exec/activate)
+grep -q 'docker tag.*CACHED_LOCAL.*CACHED[^_]' run_dev_<SUFFIX>.sh \
+    || echo "VIOLATION C12: global tag stamp missing from run_dev script"
+grep -q 'docker tag.*CACHED_LOCAL.*CACHED[^_]' deploy_<SUFFIX>.sh \
+    || echo "VIOLATION C12: global tag stamp missing from deploy script"
 
 # 5. Constraint C5 — key sync between the two YAML files
 echo "additional_image_keys:"; \

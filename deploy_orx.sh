@@ -27,6 +27,25 @@ LAUNCH_ARGS="${*:-}"
 # Container name is canonical in scripts/.isaac-ros-cli/config.yaml
 CONTAINER=$(grep -m1 'container_name:' "${WORKSPACE}/scripts/.isaac-ros-cli/config.yaml" | awk '{print $2}')
 
+DEV_IMAGE="${REGISTRY}/${PROJECT_NAME}:dev"
+CACHED="cached_isaac_run_dev_image_local:latest"           # global tag read by the CLI
+CACHED_LOCAL="cached_isaac_run_dev_image_local_${PROJECT_NAME}:latest"  # project-specific
+
+# ── Project consistency guard ────────────────────────────────────────────────
+# deploy can be invoked without run_dev (e.g. when juggling multiple projects),
+# so it guards independently using the project-specific CACHED_LOCAL.
+_cached_id=$(docker inspect --format '{{.Id}}' "${CACHED_LOCAL}" 2>/dev/null || true)
+_dev_id=$(docker inspect --format '{{.Id}}' "${DEV_IMAGE}" 2>/dev/null || true)
+if [[ -z "${_cached_id}" ]]; then
+    echo "[deploy] No local image found — pulling ${DEV_IMAGE}..."
+    docker pull "${DEV_IMAGE}" && docker tag "${DEV_IMAGE}" "${CACHED_LOCAL}" \
+        || { echo "[deploy] ERROR: image not found. Run ./run_dev_orx.sh --rebuild"; exit 1; }
+elif [[ -n "${_dev_id}" && "${_cached_id}" != "${_dev_id}" ]]; then
+    echo "[deploy] Updating local cache from ${DEV_IMAGE}..."
+    docker tag "${DEV_IMAGE}" "${CACHED_LOCAL}"
+fi
+unset _cached_id _dev_id
+
 # ── Startup script (runs inside the container via docker exec) ──────────────
 # Host variables expand now; \${...} expands inside the container.
 read -r -d '' STARTUP <<HEREDOC || true
@@ -47,6 +66,10 @@ fi
 source "\${WS}/install/setup.bash"
 exec ros2 launch ${LAUNCH_PKG} ${LAUNCH_FILE}${LAUNCH_ARGS:+ ${LAUNCH_ARGS}}
 HEREDOC
+
+# Stamp the global tag just before activate — minimises the race window when
+# multiple projects start simultaneously.
+docker tag "${CACHED_LOCAL}" "${CACHED}"
 
 # ── Ensure a container is running ───────────────────────────────────────────
 if ! docker ps --quiet --filter "name=^/${CONTAINER}$" | grep -q .; then
