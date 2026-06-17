@@ -49,6 +49,18 @@ else
 fi
 export DOCKER_ARGS_FILE="${_DOCKER_ARGS}"
 
+# ── X11 auth cookie ──────────────────────────────────────────────────────────
+# Create /tmp/.docker.xauth with a FamilyWild cookie so GUI tools (rqt, rviz2)
+# can connect to the host X server from inside the container.
+if [[ -n "${DISPLAY:-}" ]]; then
+    XAUTH_FILE=/tmp/.docker.xauth
+    touch "${XAUTH_FILE}"
+    xauth nlist "${DISPLAY}" 2>/dev/null \
+        | sed -e 's/^..../ffff/' \
+        | xauth -f "${XAUTH_FILE}" nmerge - 2>/dev/null || true
+    chmod 777 "${XAUTH_FILE}"
+fi
+
 # ── Image resolution ─────────────────────────────────────────────────────────
 # All image state is tracked via CACHED_LOCAL (project-specific tag) so that
 # multiple projects can coexist on the same machine without fighting over the

@@ -2,3 +2,5 @@
 --volume /run/udev:/run/udev:ro
 -e RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 -e ROS_DOMAIN_ID=1
+-e XAUTHORITY=/tmp/.docker.xauth
+--volume /tmp/.docker.xauth:/tmp/.docker.xauth:rw

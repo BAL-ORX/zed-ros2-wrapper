@@ -71,6 +71,19 @@ HEREDOC
 # multiple projects start simultaneously.
 docker tag "${CACHED_LOCAL}" "${CACHED}"
 
+# ── X11 auth cookie ──────────────────────────────────────────────────────────
+# Ensure /tmp/.docker.xauth exists as a file before Docker tries to bind-mount
+# it (from scripts/.isaac_ros_dev-dockerargs). Without this, Docker creates it
+# as an empty directory and X11 forwarding silently breaks.
+if [[ -n "${DISPLAY:-}" ]]; then
+    XAUTH_FILE=/tmp/.docker.xauth
+    touch "${XAUTH_FILE}"
+    xauth nlist "${DISPLAY}" 2>/dev/null \
+        | sed -e 's/^..../ffff/' \
+        | xauth -f "${XAUTH_FILE}" nmerge - 2>/dev/null || true
+    chmod 777 "${XAUTH_FILE}"
+fi
+
 # ── Ensure a container is running ───────────────────────────────────────────
 if ! docker ps --quiet --filter "name=^/${CONTAINER}$" | grep -q .; then
     echo "[deploy] Starting container..."
