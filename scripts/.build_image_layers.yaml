@@ -14,12 +14,13 @@
 #   dependency         → set to ../.. so the workspace root is the build context,
 #                        enabling `COPY src/<pkg>/package.xml` inside the Dockerfile
 image_key_order:
-  - isaac_ros.zed.dependency
+  - isaac_ros.zed.dependency.h264
 
 context_overrides:
   isaac_ros: ..
   noble: ..
   dependency: ../..
+  h264: ../..
 
 cache_to_registry_names: []
 cache_from_registry_names:

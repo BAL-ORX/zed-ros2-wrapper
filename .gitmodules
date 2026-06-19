@@ -1,0 +1,4 @@
+[submodule "src/isaac_ros_h264_encoder"]
+	path = src/isaac_ros_h264_encoder
+	url = git@gitlab.uzh.ch:BAL-ORX/isaac_ros_h264_encoder.git
+	branch = submodule

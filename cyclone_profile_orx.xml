@@ -2,8 +2,8 @@
     <Domain id="any">
         <General>
             <Interfaces>
-                <!-- <NetworkInterface name="enp10s0"  multicast="true" /> -->
-                <NetworkInterface autodetermine="true" priority="default" multicast="default" />
+                <NetworkInterface name="lo"  multicast="true" />
+                <!-- <NetworkInterface autodetermine="true" priority="default" multicast="default" /> -->
             </Interfaces>
             <AllowMulticast>true</AllowMulticast>
             <EnableMulticastLoopback>true</EnableMulticastLoopback>

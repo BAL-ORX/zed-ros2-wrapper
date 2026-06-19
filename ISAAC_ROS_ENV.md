@@ -227,15 +227,73 @@ Use `ip link` on the host to find the correct interface name.
 
 ---
 
+## ZED camera → encoder data path
+
+The ZED node and the H264 encoder node share a `ComposableNodeContainer`. Whether
+and how they communicate depends on `config_orx.yaml`:
+
+```
+disable_nitros: false  (default)
+```
+
+```
+ZED node  ──ManagedNitrosPublisher (BGRA8)──►  NITROS negotiation
+                                                  │  format conversion BGRA8→BGR8
+                                                  ▼
+                                           EncoderNode (BGR8) ──► H264 bitstream (sensor_msgs/CompressedImage)
+```
+
+- **NITROS avoids DDS serialisation** — the frame is not copied through the network
+  stack. The BGRA→BGR conversion (strip alpha channel) is the only overhead and
+  occurs in GPU memory.
+- **Encoder output is plain ROS 2** — the encoder's output publisher is NITROS
+  `NEGOTIATED` type. When there is no NITROS subscriber downstream it automatically
+  publishes `sensor_msgs/CompressedImage` over DDS. Nothing needs to be configured.
+
+**Why `enable_ipc` does not help here:**
+
+`config_orx.yaml` has `enable_ipc: true` with `ipc_nitros_conflict_policy: "disable_ipc"`.
+ROS 2 intra-process communication (IPC) and NITROS cannot be active on the same node
+simultaneously — NITROS uses volatile QoS durability internally, which conflicts with
+the transient-local durability that ROS 2 IPC requires. The launch file detects this
+and silently forces `enable_ipc: false` on the ZED node. NITROS is the better path
+anyway: it avoids serialisation while IPC would still require a type-adapter conversion.
+
+**Why this is the best available path:**
+
+The ZED node is a plain `rclcpp::Node` — not a full NVIDIA `NitrosNode`. True GXF-level
+zero-copy between two NitrosNodes sharing a GXF graph is not possible here. The
+`ManagedNitrosPublisher` path is the closest equivalent available from a standard ROS 2
+node.
+
+**Required config for encoding to work:**
+
+```yaml
+# config_orx.yaml
+video:
+  publish_left_right: true   # creates the left/color/rect/image and right/color/rect/image NITROS publishers
+debug:
+  disable_nitros: false      # keep NITROS active (default)
+encoder:
+  enabled: true
+```
+
+---
+
 ## Docker image layer architecture
 
 | Layer | Dockerfile location | Purpose |
 |-------|-------------------|---------|
 | `isaac_ros` | `/etc/isaac-ros-cli/docker/Dockerfile.isaac_ros` | NVIDIA base (CUDA, cuDNN, Isaac ROS) |
 | `noble` | `/etc/isaac-ros-cli/docker/Dockerfile.noble` | Ubuntu Noble base tweaks |
-| `dependency` | `scripts/docker/Dockerfile.dependency` | Project ROS packages and rosdep deps |
+| `zed` | `/etc/isaac-ros-cli/docker/Dockerfile.zed` | ZED SDK |
+| `dependency` | `scripts/docker/Dockerfile.dependency` | ZED ROS 2 wrapper packages and rosdep deps |
+| `h264` | `scripts/docker/Dockerfile.h264` | H264 encoder NITROS packages (`isaac_ros_h264_encoder`) |
 
-Additional layers (e.g. a ZED SDK layer) can be inserted by listing them in `additional_image_keys` and `image_key_order`.
+To add or remove a layer, update **both** `additional_image_keys` in
+`scripts/.isaac-ros-cli/config.yaml` and `image_key_order` in
+`scripts/.build_image_layers.yaml` — they are read by two separate CLI loaders and
+must stay in sync.
 
 ---
 

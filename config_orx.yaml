@@ -85,8 +85,8 @@ ros_params:
         # --- from zed2i.yaml ---
         camera_model: 'zed2i'           # overwritten by launch.camera_model
         camera_name: 'zed2i'            # overwritten by launch.camera_name
-        grab_resolution: 'HD720'        # 'HD2K' | 'HD1080' | 'HD720' | 'VGA' | 'AUTO'
-        grab_frame_rate: 15
+        grab_resolution: 'HD1080'        # 'HD2K' | 'HD1080' | 'HD720' | 'VGA' | 'AUTO'
+        grab_frame_rate: 30
 
       # ── Video ─────────────────────────────────────────────────────────────────
       video:
@@ -101,7 +101,7 @@ ros_params:
         whitebalance_temperature: 42     # [DYNAMIC] [28,65]×100, only if auto_whitebalance false
         enable_24bit_output: true        # This is required for the encoding !!
         publish_rgb: true
-        publish_left_right: false
+        publish_left_right: true             # required for encoder: enables left/color/rect/image and right/color/rect/image
         publish_raw: false
         publish_gray: false
         publish_stereo: false
@@ -340,3 +340,31 @@ ros_params:
         debug_advanced: false
         debug_nitros: false
         disable_nitros: false
+
+
+# ── H264 Encoder ──────────────────────────────────────────────────────────────
+# Controls optional NITROS zero-copy encoding of ZED images.
+# When enabled, two EncoderNodes are loaded into the same container as the ZED
+# node, enabling NITROS zero-copy IPC without crossing process boundaries.
+# Requires: debug.disable_nitros: false (NITROS must be active for zero-copy).
+encoder:
+  enabled: true
+
+  # Source topics published by the ZED node, relative to /{namespace}/{node_name}/.
+  # ZED publishes rectified color images at: left/color/rect/image
+  # Set input_right to "" to encode only the left stream.
+  input_left: "left/color/rect/image"
+  input_right: "right/color/rect/image"
+
+  # Output topics, relative to /{namespace}/.
+  output_left: "left/image_compressed"
+  output_right: "right/image_compressed"
+
+  # EncoderNode parameters (see isaac_ros_h264_encoder::EncoderNode).
+  input_width: 1920             # Must match the ZED grab resolution width
+  input_height: 1080            # Must match the ZED grab resolution height
+  qp: 15                       # Quantization parameter [1-51]; lower = better quality, more bits
+  hw_preset_type: 0             # 0=default, 1=hp, 2=hq, 3=ll, 4=llhp, 5=llhq, 6=lossless
+  profile: 0                    # 0=baseline, 1=main, 2=high
+  iframe_interval: 5            # Keyframe (I-frame) interval in frames
+  config: "pframe_cqp"          # Encoding mode: "pframe_cqp" | "iframe_cqp" | "pframe_vbr"

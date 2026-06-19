@@ -1,0 +1,37 @@
+# syntax=docker/dockerfile:1
+# H264 encoder dependency layer — installs ROS 2 and system packages
+# required by isaac_ros_h264_encoder.
+#
+# This Dockerfile is discovered via scripts/.isaac_ros_common-config and
+# layered on top of the base Isaac ROS image by `isaac-ros activate --build-local`.
+#
+# To rebuild after changing this file:
+#   ./run_dev_orx.sh --rebuild
+
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Install apt packages needed by the encoder.
+# isaac_ros_* packages are listed explicitly because rosdep skips them
+# (not in the standard rosdep database); they must be installed directly from
+# NVIDIA's apt repos which are already configured in the base image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-isaac-ros-common \
+    ros-jazzy-isaac-ros-gxf \
+    ros-jazzy-isaac-ros-nitros \
+    ros-jazzy-isaac-ros-nitros-image-type \
+    ros-jazzy-isaac-ros-nitros-compressed-image-type \
+    ros-jazzy-isaac-ros-image-proc \
+    nvv4l2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-install all rosdep dependencies so colcon build doesn't need a network call.
+# Only package.xml files are copied here — source changes don't bust this cache layer.
+# Note: the ROS package lives one level inside the submodule root.
+COPY src/isaac_ros_h264_encoder/isaac_ros_h264_encoder/package.xml \
+     /tmp/ros_deps/isaac_ros_h264_encoder/package.xml
+
+RUN apt-get update \
+    && rosdep update \
+    && rosdep install --from-paths /tmp/ros_deps --ignore-src -r -y \
+    && rm -rf /tmp/ros_deps /var/lib/apt/lists/*

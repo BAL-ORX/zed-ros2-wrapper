@@ -9,3 +9,4 @@ docker:
     additional_image_keys:
       - zed
       - dependency
+      - h264

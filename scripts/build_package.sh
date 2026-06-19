@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash 2>/dev/null || true
+source /opt/ros_ws/install/setup.bash 2>/dev/null || true
+
 set -euo pipefail
 
 # rosdep install is not needed here — all workspace dependencies are

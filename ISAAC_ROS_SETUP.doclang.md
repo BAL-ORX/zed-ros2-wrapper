@@ -70,6 +70,8 @@ adapting to a new project, all of these change.
 | `CACHED_LOCAL` | Project-specific tag: `cached_isaac_run_dev_image_local_${PROJECT_NAME}:latest`. Used for all image resolution and consistency checks; stamped to the global tag only at the last moment. |
 | `DEV_IMAGE` | Registry image: `${REGISTRY}/${PROJECT_NAME}:dev`. |
 | `CYCLONEDDS_PROFILE` | Optional host environment variable. If set, its value must be an absolute path to an external CycloneDDS XML config that will be mounted into the container. |
+| `SIDECAR_NODE` | A composable node loaded into the same `ComposableNodeContainer` as the primary node to participate in NITROS zero-copy IPC. Not a separate process; not a separate container. |
+| `TARGET_CONTAINER` | Fully-qualified ROS 2 name of the container a sidecar loads into: `/{namespace}/{container_name}`. Must match the container created by the primary launch file. |
 
 
 # @architecture
@@ -614,6 +616,265 @@ docker exec -it "${CONTAINER}" /bin/bash -c "${STARTUP}"
 `chmod +x deploy_<SUFFIX>.sh`
 
 
+# @patterns
+
+## Pattern: optional sidecar composable node
+
+Use this pattern to add a processing node (e.g. an H264 encoder, a depth
+filter, a republisher) that must share a process with the primary node to
+exploit NITROS zero-copy IPC. The sidecar is toggled by a flag in the project
+config YAML; no launch file argument and no rebuild is needed to switch it on
+or off.
+
+### When to use
+
+- The sidecar communicates with the primary node over NITROS types
+  (`NitrosImage`, `NitrosTensor`, …).
+- You want zero-copy transport without crossing a process boundary.
+- The sidecar is optional: some deployments run it, others do not.
+
+### Prerequisites
+
+| Requirement | Why |
+|-------------|-----|
+| Primary node's `debug.disable_nitros` is `false` | NITROS negotiates zero-copy only when active |
+| Both nodes are composable (`rclcpp_components`) | `LoadComposableNodes` requires this |
+| The sidecar package is present in `src/` and built | It must be in the colcon workspace |
+| The sidecar package's apt dependencies are in `Dockerfile.<IMAGE_KEY>` | Same image layer rule as any dependency |
+
+If `disable_nitros: true` is set, both nodes will still run and communicate,
+but over serialised DDS transport rather than zero-copy. There is no error.
+
+### How NITROS zero-copy works
+
+When two composable nodes share the same `ComposableNodeContainer` **and**
+both use NITROS publisher/subscriber types, the NITROS framework negotiates a
+zero-copy path at startup. This is independent of ROS 2's
+`use_intra_process_comms` flag. Do **not** set `use_intra_process_comms: true`
+on the sidecar — it is irrelevant for NITROS and can conflict with the primary
+node's IPC policy (see `ipc_nitros_conflict_policy` in `@architecture`).
+
+### Files to change
+
+| File | Change |
+|------|--------|
+| `config_<SUFFIX>.yaml` | Add a top-level `<sidecar>:` section with `enabled`, topic names, and node parameters. |
+| `src/<LAUNCH_PKG>/launch/orx_<SUFFIX>.launch.py` | Read `<sidecar>:` at launch time; conditionally call `LoadComposableNodes`. |
+| `scripts/docker/Dockerfile.<IMAGE_KEY>` | Add the sidecar's apt packages. |
+
+### Config YAML schema
+
+Add a new top-level section (parallel to `launch:` and `ros_params:`):
+
+```yaml
+<sidecar>:
+  enabled: false          # Toggle — no rebuild needed
+
+  # Topic remappings (values are absolute ROS 2 topic paths).
+  # Build input paths as /{namespace}/{node_name}/{topic_suffix}
+  # to reach the primary node's private topics (published under ~/…).
+  input_<stream>: "/<namespace>/<node_name>/<topic_suffix>"
+  output_<stream>: "/<namespace>/<output_topic>"
+
+  # Node-specific parameters (all passed via parameters=[{...}])
+  <param_name>: <value>
+```
+
+**Rule:** `input_*` paths MUST use absolute topic names derived from the primary
+node's private namespace (`~/` = `/{namespace}/{node_name}/`).
+
+### Launch file changes
+
+Inside `launch_setup()`, after the primary `IncludeLaunchDescription`, add:
+
+```python
+from launch_ros.actions import LoadComposableNodes
+from launch_ros.descriptions import ComposableNode
+
+if sidecar_cfg.get('enabled', False):
+    # Resolve the container the primary node was loaded into.
+    # zed_camera.launch.py creates 'zed_container' when container_name is empty.
+    namespace       = launch_cfg.get('namespace', '') or launch_cfg.get('camera_name', 'zed')
+    node_name       = launch_cfg.get('node_name', 'zed_node')
+    container_name  = launch_cfg.get('container_name', '') or 'zed_container'
+    target_container = f'/{namespace}/{container_name}'
+
+    actions.append(LoadComposableNodes(
+        composable_node_descriptions=[
+            ComposableNode(
+                package='<sidecar_package>',
+                plugin='<vendor>::<SidecarNode>',
+                name='<sidecar_node_name>',
+                namespace=namespace,
+                parameters=[{<param>: sidecar_cfg.get('<param>', <default>), ...}],
+                remappings=[
+                    ('input_topic',  f'/{namespace}/{node_name}/{input_suffix}'),
+                    ('output_topic', f'/{namespace}/{output_suffix}'),
+                ],
+            )
+        ],
+        target_container=target_container,
+    ))
+```
+
+**Do not** create a new `ComposableNodeContainer` for the sidecar. Loading into
+`target_container` is what puts both nodes in the same process.
+
+### Dockerfile change
+
+A sidecar with heavy or NVIDIA-specific dependencies MUST get its own
+`Dockerfile.<NEW_KEY>` rather than being appended to an existing layer.
+Adding it to an existing Dockerfile would bust the cache for every package
+already in that layer whenever the sidecar's deps change.
+
+**Check whether the submodule already ships a Dockerfile:**
+
+Many NVIDIA Isaac ROS submodules include `docker/Dockerfile.<KEY>` inside the
+submodule directory. If one exists, use it as the starting point:
+
+```
+src/<submodule>/docker/Dockerfile.<KEY>   ← reference provided by the submodule
+scripts/docker/Dockerfile.<KEY>           ← adapted copy consumed by the CLI
+```
+
+Always copy to `scripts/docker/` — the CLI searches `CONFIG_DOCKER_SEARCH_DIRS`
+which resolves to `WORKSPACE/scripts/docker/` first. Then verify every
+`COPY src/…` path: if the submodule is nested under `src/<submodule>/`, the
+package.xml lives one level deeper than the submodule assumes, and the path
+must be updated accordingly (see the concrete example below).
+
+**1. Create `scripts/docker/Dockerfile.<NEW_KEY>`:**
+
+```dockerfile
+# syntax=docker/dockerfile:1
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-<sidecar-apt-package> \
+    && rm -rf /var/lib/apt/lists/*
+
+# Note: if the ROS package lives inside a submodule directory, the COPY path
+# must reflect that nesting:
+#   submodule at src/<submodule>/        → COPY src/<submodule>/<pkg>/package.xml
+#   flat package at src/<pkg>/           → COPY src/<pkg>/package.xml
+COPY src/<path-to>/package.xml /tmp/ros_deps/<pkg>/package.xml
+
+RUN apt-get update \
+    && rosdep update \
+    && rosdep install --from-paths /tmp/ros_deps --ignore-src -r -y \
+    && rm -rf /tmp/ros_deps /var/lib/apt/lists/*
+```
+
+**2. Register the new key in both CLI config files (C5 invariant):**
+
+`scripts/.isaac-ros-cli/config.yaml` — append to `additional_image_keys`:
+```yaml
+additional_image_keys:
+  - <existing_key>
+  - <NEW_KEY>
+```
+
+`scripts/.build_image_layers.yaml` — append to `image_key_order` and add context override:
+```yaml
+image_key_order:
+  - isaac_ros.<existing_keys>.<NEW_KEY>
+
+context_overrides:
+  <NEW_KEY>: ../..   # workspace root, enables COPY src/…
+```
+
+After editing both files, rebuild and push:
+```bash
+./run_dev_<SUFFIX>.sh --rebuild
+docker push ${REGISTRY}/${PROJECT_NAME}:dev
+```
+
+### Concrete example: ZED + H264 encoder
+
+The `isaac_ros_h264_encoder` submodule is the reference implementation of this
+pattern in the ZED ROS 2 wrapper project.
+
+| Symbol | Value |
+|--------|-------|
+| sidecar package | `isaac_ros_h264_encoder` |
+| sidecar plugin | `nvidia::isaac_ros::h264_encoder::EncoderNode` |
+| Docker layer key | `h264` → `scripts/docker/Dockerfile.h264` |
+| config section | `encoder:` in `config_orx.yaml` |
+| enabled toggle | `encoder.enabled: false` |
+| target container | `/zed/zed_container` |
+| input topics | `/{namespace}/{node_name}/left/color/rect/image` |
+| output topics | `/{namespace}/left/image_compressed` |
+
+Docker layer registration (C5 invariant — both files kept in sync):
+
+```
+scripts/.isaac-ros-cli/config.yaml   additional_image_keys: [zed, dependency, h264]
+scripts/.build_image_layers.yaml     image_key_order: [isaac_ros.zed.dependency.h264]
+                                     context_overrides: h264: ../..
+```
+
+**Dockerfile source — the submodule ships its own Dockerfile:**
+
+```
+src/isaac_ros_h264_encoder/docker/Dockerfile.h264   ← provided by the submodule
+scripts/docker/Dockerfile.h264                       ← adapted copy used by the CLI
+```
+
+The submodule's Dockerfile is the reference, but it cannot be used directly because
+its `COPY` path assumes the package sits at the submodule root:
+
+```dockerfile
+# submodule original — wrong for this project's layout:
+COPY src/isaac_ros_h264_encoder/package.xml ...
+```
+
+When the submodule lives under `src/isaac_ros_h264_encoder/`, the ROS package is
+nested one level deeper. The adapted copy in `scripts/docker/Dockerfile.h264`
+corrects this:
+
+```dockerfile
+# scripts/docker/Dockerfile.h264 — correct for nested submodule:
+COPY src/isaac_ros_h264_encoder/isaac_ros_h264_encoder/package.xml ...
+```
+
+**General rule:** when a submodule ships `<submodule>/docker/Dockerfile.<KEY>`,
+copy it to `scripts/docker/Dockerfile.<KEY>` and verify every `COPY src/…`
+path against the actual file tree. The CLI always uses the copy in
+`scripts/docker/` (first in `CONFIG_DOCKER_SEARCH_DIRS`).
+
+EncoderNode parameters declared in `encoder_node.cpp`:
+
+| Parameter | Type | Default | Notes |
+|-----------|------|---------|-------|
+| `input_width` | int32 | 1920 | Must match ZED `grab_resolution` width |
+| `input_height` | int32 | 1200 | Must match ZED `grab_resolution` height |
+| `qp` | int32 | 20 | Quantization parameter [1-51]; lower = better quality |
+| `hw_preset_type` | int32 | 0 | 0=default 1=hp 2=hq 3=ll 4=llhp 5=llhq 6=lossless |
+| `profile` | int32 | 0 | 0=baseline 1=main 2=high |
+| `iframe_interval` | int32 | 5 | Keyframe interval in frames |
+| `config` | string | `"pframe_cqp"` | `"pframe_cqp"` \| `"iframe_cqp"` \| `"pframe_vbr"` |
+
+ZED image topic naming — the ZED node uses `mTopicRoot = "~/"`, which
+ROS 2 resolves to `/{namespace}/{node_name}/`. Image topics follow the pattern:
+
+```
+/{namespace}/{node_name}/{sensor}/{color_mode}/{rect_raw}/image
+
+sensor     : left/ | right/ | rgb/ | stereo/
+color_mode : color/ | gray/
+rect_raw   : rect/ | raw/
+```
+
+Examples with defaults (`camera_name=zed`, `node_name=zed_node`):
+
+| Topic | Description |
+|-------|-------------|
+| `/zed/zed_node/left/color/rect/image` | Left rectified colour — encoder input |
+| `/zed/zed_node/right/color/rect/image` | Right rectified colour — encoder input |
+| `/zed/zed_node/rgb/color/rect/image` | Combined RGB rectified colour |
+
+
 # @constraints
 
 These MUST hold at all times. Any agent modifying this environment MUST verify
@@ -633,6 +894,9 @@ each constraint after making changes.
 | C10 | `ISAAC_ROS_WS` MUST be `WORKSPACE/scripts` for all `isaac-ros activate` calls (required by `isaac_ros_common_config_utils.py` for build config discovery). |
 | C11 | `scripts/.isaac_ros_dev-dockerargs` MUST be read by the run/deploy scripts via `grep` and injected into `$DOCKER_ARGS_FILE` — never rely on the CLI to find it automatically. |
 | C12 | run/deploy scripts MUST use a project-specific `CACHED_LOCAL` tag for all image resolution. The global `cached_isaac_run_dev_image_local:latest` MUST only be written in the single `docker tag` call immediately before `isaac-ros activate --use-cached-build-image`. |
+| C13 | A sidecar node MUST be loaded via `LoadComposableNodes` into the existing `TARGET_CONTAINER` — never into a new `ComposableNodeContainer`. Creating a new container defeats zero-copy IPC. |
+| C14 | Sidecar input topic remappings MUST use absolute paths derived from `/{namespace}/{node_name}/…`. Relative paths resolve against the sidecar's own namespace and will not reach the primary node's private topics. |
+| C15 | `use_intra_process_comms` MUST NOT be set on a NITROS sidecar node. NITROS manages zero-copy transport internally; setting this flag introduces a volatile-durability conflict with the primary node. |
 
 
 # @validation
