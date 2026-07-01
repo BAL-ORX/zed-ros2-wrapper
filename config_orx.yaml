@@ -1,9 +1,11 @@
-# config_orx.yaml — single configuration file for orx_zed_camera.launch.py
+# config.yaml — default configurations for project code
 #
-# Place this file at the workspace root (/workspaces/isaac_ros-dev/ inside the container).
-# Pass a different path with:
-#   ros2 launch zed_wrapper orx_zed_camera.launch.py config_path:=/path/to/file.yaml
-#
+# File containing the default parmeter configurations for project
+# executables.
+# The file should ideally contain working configurations for all nodes
+# defined in the project.
+# 
+
 # Parameter priority (highest → lowest):
 #   1. launch: section (passed as ROS 2 launch arguments)
 #   2. ros_params: section below (passed as ros_params_override_path)
@@ -22,12 +24,12 @@ launch:
   namespace: ""                   # Defaults to camera_name if empty
   serial_number: 0                # 0 = open first available camera
   camera_id: -1                   # -1 = unused
-  publish_urdf: true
-  publish_tf: true
-  publish_map_tf: true
+  publish_urdf: false
+  publish_tf: false
+  publish_map_tf: false
   publish_imu_tf: false
   enable_gnss: false
-  enable_ipc: true
+  enable_ipc: false
   use_sim_time: false
   svo_path: "live"                # Path to SVO file, or "live" for live camera
   publish_svo_clock: false
@@ -100,8 +102,8 @@ ros_params:
         auto_whitebalance: true          # [DYNAMIC]
         whitebalance_temperature: 42     # [DYNAMIC] [28,65]×100, only if auto_whitebalance false
         enable_24bit_output: true        # This is required for the encoding !!
-        publish_rgb: true
-        publish_left_right: true             # required for encoder: enables left/color/rect/image and right/color/rect/image
+        publish_rgb: false
+        publish_left_right: true         # required for encoder: enables left/color/rect/image and right/color/rect/image
         publish_raw: false
         publish_gray: false
         publish_stereo: false
@@ -115,7 +117,7 @@ ros_params:
         publish_imu_tf: false            # overwritten by launch.publish_imu_tf
         sensors_image_sync: false
         sensors_pub_rate: 100.0          # Hz, MAX 400
-        publish_imu: true
+        publish_imu: false
         publish_imu_raw: false
         publish_cam_imu_transf: false
         publish_mag: false
@@ -166,9 +168,9 @@ ros_params:
       pos_tracking:
         pos_tracking_enabled: false
         pos_tracking_mode: 'AUTO'       # 'AUTO' | 'GEN_1' | 'GEN_3'
-        imu_fusion: true
-        publish_tf: true                # overwritten by launch.publish_tf
-        publish_map_tf: true            # overwritten by launch.publish_map_tf
+        imu_fusion: false
+        publish_tf: false               # overwritten by launch.publish_tf
+        publish_map_tf: false           # overwritten by launch.publish_map_tf
         map_frame: 'map'
         odometry_frame: 'odom'
         area_memory: true
@@ -189,7 +191,7 @@ ros_params:
         fixed_z_value: 0.0
         transform_time_offset: 0.0
         reset_pose_with_svo_loop: true
-        publish_odom_pose: true
+        publish_odom_pose: false
         publish_pose_cov: false
         publish_cam_path: false
 
@@ -200,10 +202,10 @@ ros_params:
         gnss_zero_altitude: false
         h_covariance_mul: 1.0
         v_covariance_mul: 1.0
-        publish_utm_tf: true
+        publish_utm_tf: false
         broadcast_utm_transform_as_parent_frame: false
         enable_reinitialization: false
-        enable_rolling_calibration: true
+        enable_rolling_calibration: false
         enable_translation_uncertainty_target: false
         gnss_vio_reinit_threshold: 5.0
         target_translation_uncertainty: 0.1  # m
@@ -223,7 +225,7 @@ ros_params:
       # ── Object Detection ──────────────────────────────────────────────────────
       object_detection:
         od_enabled: false
-        enable_tracking: true
+        enable_tracking: false
         detection_model: 'MULTI_CLASS_BOX_FAST'  # 'MULTI_CLASS_BOX_FAST' | 'MULTI_CLASS_BOX_MEDIUM'
                                                   # 'MULTI_CLASS_BOX_ACCURATE' | 'PERSON_HEAD_BOX_FAST'
                                                   # 'PERSON_HEAD_BOX_ACCURATE' | 'CUSTOM_YOLOLIKE_BOX_OBJECTS'
@@ -347,24 +349,32 @@ ros_params:
 # When enabled, two EncoderNodes are loaded into the same container as the ZED
 # node, enabling NITROS zero-copy IPC without crossing process boundaries.
 # Requires: debug.disable_nitros: false (NITROS must be active for zero-copy).
-encoder:
-  enabled: true
+encoders:
+  - name: h264_encoder
+    namespace: /zed/right
+    # source & sink topics
+    image_raw: /zed/zed_node/right/color/rect/image
+    image_compressed: h264
+    # EncoderNode parameters (see isaac_ros_h264_encoder::EncoderNode).
+    input_width: 1920             # Must match the ZED grab resolution width
+    input_height: 1080            # Must match the ZED grab resolution height
+    qp: 15                        # Quantization parameter [1-51]; lower = better quality, more bits
+    hw_preset_type: 0             # 0=default, 1=hp, 2=hq, 3=ll, 4=llhp, 5=llhq, 6=lossless
+    profile: 0                    # 0=baseline, 1=main, 2=high
+    iframe_interval: 5            # Keyframe (I-frame) interval in frames
+    config: "pframe_cqp"          # Encoding mode: "pframe_cqp" | "iframe_cqp" | "pframe_vbr"
+  - name: h264_encoder
+    namespace: /zed/left
+    # source & sink topics
+    image_raw: /zed/zed_node/left/color/rect/image
+    image_compressed: h264
+    # EncoderNode parameters (see isaac_ros_h264_encoder::EncoderNode).
+    input_width: 1920             # Must match the ZED grab resolution width
+    input_height: 1080            # Must match the ZED grab resolution height
+    qp: 15                        # Quantization parameter [1-51]; lower = better quality, more bits
+    hw_preset_type: 0             # 0=default, 1=hp, 2=hq, 3=ll, 4=llhp, 5=llhq, 6=lossless
+    profile: 0                    # 0=baseline, 1=main, 2=high
+    iframe_interval: 5            # Keyframe (I-frame) interval in frames
+    config: "pframe_cqp"          # Encoding mode: "pframe_cqp" | "iframe_cqp" | "pframe_vbr"
 
-  # Source topics published by the ZED node, relative to /{namespace}/{node_name}/.
-  # ZED publishes rectified color images at: left/color/rect/image
-  # Set input_right to "" to encode only the left stream.
-  input_left: "left/color/rect/image"
-  input_right: "right/color/rect/image"
 
-  # Output topics, relative to /{namespace}/.
-  output_left: "left/image_compressed"
-  output_right: "right/image_compressed"
-
-  # EncoderNode parameters (see isaac_ros_h264_encoder::EncoderNode).
-  input_width: 1920             # Must match the ZED grab resolution width
-  input_height: 1080            # Must match the ZED grab resolution height
-  qp: 15                       # Quantization parameter [1-51]; lower = better quality, more bits
-  hw_preset_type: 0             # 0=default, 1=hp, 2=hq, 3=ll, 4=llhp, 5=llhq, 6=lossless
-  profile: 0                    # 0=baseline, 1=main, 2=high
-  iframe_interval: 5            # Keyframe (I-frame) interval in frames
-  config: "pframe_cqp"          # Encoding mode: "pframe_cqp" | "iframe_cqp" | "pframe_vbr"
